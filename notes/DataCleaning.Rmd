@@ -1,0 +1,161 @@
+---
+title: "Data Cleaning"
+author: "Ethan Leap"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(tinytex) 
+ 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.width = "60%",fig.align='center')
+```
+
+
+
+```{r}
+library(tidyverse)
+
+in_path  <- "C:/Users/ethan/Downloads/all_matches.csv"
+out_path <- "C:/Users/ethan/Downloads/volleyball_points_dataset.csv"
+
+```
+
+```{r}
+touches <- read_csv(in_path, show_col_types = FALSE)
+
+order_col <- if ("Unnamed: 0" %in% names(touches)) "Unnamed: 0" else NULL
+
+touches_ord <- touches %>%
+  {
+    if (!is.null(order_col)) arrange(., match_id, set_number, .data[[order_col]])
+    else group_by(., match_id, set_number) %>% arrange(row_number(), .by_group = TRUE) %>% ungroup()
+  }
+```
+
+To compress rallies accurately, touches must be sorted in the exact sequence they occurred. We sort by match_id, set_number, and a stable row index so subsequent steps (like detecting score changes) behave correctly.
+
+```{r}
+touches_flagged <- touches_ord %>%
+  group_by(match_id, set_number) %>%
+  mutate(
+    prev_home  = lag(home_team_score),
+    prev_away  = lag(visiting_team_score),
+    rally_end_flag = (home_team_score != prev_home) | (visiting_team_score != prev_away),
+    rally_end_flag = replace_na(rally_end_flag, TRUE),
+    rally_id = cumsum(rally_end_flag)
+  ) %>%
+  ungroup()
+```
+
+Volleyball is rally scoring; each rally ends when the scoreboard moves. By turning score changes into a “flag” and cumulatively summing, every touch is assigned to the rally that produced (or followed) a point.
+
+```{r}
+to_logical_vec <- function(x) {
+  if (is.logical(x)) x
+  else if (is.numeric(x)) x != 0
+  else tolower(as.character(x)) %in% c("true","t","yes","y","1")
+}
+```
+
+“Between points” events like timeouts are often recorded right after a point and before the next serve. We’ll roll them up with the rally that just ended (i.e., the point that triggered them).
+
+```{r}
+points_core <- touches_flagged %>%
+  group_by(match_id, set_number, rally_id) %>%
+  summarise(
+    home_score_end        = last(home_team_score),
+    away_score_end        = last(visiting_team_score),
+    serving_team          = first(serving_team),          
+    touches_in_rally      = n(),
+    team_rotation         = suppressWarnings(as.integer(last(team_rotation))),
+    opp_rotation          = suppressWarnings(as.integer(last(opp_rotation))),
+    score_diff_raw        = suppressWarnings(as.integer(last(score_diff))),
+    timeout_after_point   = any(to_logical_vec(timeout), na.rm = TRUE),
+    substitution_after_point = any(to_logical_vec(substitution), na.rm = TRUE),
+    home_team             = last(home_team),
+    visiting_team         = last(visiting_team),
+    won_set               = last(won_set),
+    date                  = last(date),
+    season                = last(season),
+    conference            = last(conference),
+    .groups = "drop"
+  ) %>%
+  arrange(match_id, set_number, rally_id)
+
+```
+
+(JUST NOTED: Touches in rally is incorrect due to nature of all-matches data set with "empty" rows)
+
+We collapse many touches into a single rally row. We take last scores to capture the scoreboard after the point, and any() over timeout/sub to mark whether the inter-point stoppage happened following that point.
+
+```{r}
+points_w_winner <- points_core %>%
+  group_by(match_id, set_number) %>%
+  mutate(
+    prev_home_end = lag(home_score_end, default = 0),
+    prev_away_end = lag(away_score_end, default = 0),
+    home_delta    = home_score_end - prev_home_end,
+    away_delta    = away_score_end - prev_away_end,
+    point_winner_team = case_when(
+      home_delta == 1 & away_delta == 0 ~ home_team,
+      away_delta == 1 & home_delta == 0 ~ visiting_team,
+      TRUE ~ NA_character_            
+    )
+  ) %>%
+  ungroup()
+```
+
+Had some problems with timeout booleans. So above is the fix. Exactly one side’s score should increase by 1 at a rally end. Using deltas bypasses missing point_won_by values and avoids problems assigning winners when TO/Sub rows appear.
+
+```{r}
+points_cu <- points_w_winner %>%
+  mutate(
+    cu_is_home        = home_team == "CU",
+    cu_score_end      = if_else(cu_is_home, home_score_end, away_score_end),
+    opp_score_end     = if_else(cu_is_home, away_score_end, home_score_end),
+    cu_point_won      = point_winner_team == "CU",
+    cu_score_diff_end = cu_score_end - opp_score_end,
+    cu_serving        = serving_team == "CU"
+  )
+
+```
+
+By aligning columns to CU, we can analyze run lengths, in-rally momentum, and timeout efficacy without worrying about home/away flipping your signs.
+
+```{r}
+set_scores <- touches_flagged %>%
+  group_by(match_id, set_number) %>%
+  summarise(
+    final_home_set_score = max(home_team_score, na.rm = TRUE),
+    final_away_set_score = max(visiting_team_score, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+points_final <- points_cu %>%
+  left_join(set_scores, by = c("match_id", "set_number")) %>%
+  select(
+    match_id, date, season, conference,
+    home_team, visiting_team, set_number, rally_id,
+    cu_serving,
+    cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
+    final_home_set_score, final_away_set_score,
+    won_set,
+  )
+
+```
+
+Final set scores provide outcome context for every rally (like late-set pressure).
+
+```{r}
+write_csv(points_final, out_path)
+
+head(points_final, 10)
+
+```
+
