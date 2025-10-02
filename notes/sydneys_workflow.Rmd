@@ -1,0 +1,42 @@
+---
+title: "sydneys_workflow"
+output: word_document
+date: "2025-10-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Libraries 
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+## Load Datasets
+```{r}
+all_matches_CU <- read.csv("datasets/all_matches_CU.csv")                 #551 by 16
+all_matches_opp <- read.csv("datasets/all_matches_opp.csv")               #551 by 16
+all_matches_processed <- read.csv("datasets/all_matches_processed.csv")   #1102 by 16
+
+all_matches_raw <- read.csv("datasets/all_matches_raw.csv")              #269628 by 87
+conference_matches_raw <- read.csv("datasets/conference_matches_raw.csv")   #168769 by 87
+dirty_conference_matches_raw <- read.csv("datasets/dirty_conference_matches_raw.csv")   #259250 by 87
+
+dirty_conference_matches <- read.csv("datasets/dirty_conference_matches.csv")          #259250 by 125
+```
+
+
+## Cleaning + Wrangling Data 
+-claim important + useful varaibles to write about report 2
+
+## Exploratory Analysis
+
+## Assumptions
+
+
+## MODELING 
+#Markov Chain Modeling 
+
+#Cluster Analysis 
