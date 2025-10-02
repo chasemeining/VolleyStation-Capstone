@@ -1,0 +1,95 @@
+---
+title: "Markov Chain Building"
+author: "Ethan Leap"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(tinytex)
+library(dplyr)
+library(readr)
+library(purrr)
+library(tidyr)
+library(broom)  
+
+
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.width = "60%",fig.align='center')
+```
+
+```{r}
+pbp <- read_csv("C:/Users/ethan/Downloads/volleyball_points_dataset.csv", show_col_types = FALSE)
+
+# --- derive pre-rally differential from end-of-rally scores ---
+pbp2 <- pbp %>%
+  mutate(
+    y = as.integer(cu_point_won),        # outcome
+    cu_score_pre  = cu_score_end  - y,   # pre-rally CU score
+    opp_score_pre = opp_score_end - (1L - y), # pre-rally opp score
+    d_pre = cu_score_pre - opp_score_pre,
+    cu_serv = as.integer(cu_serving)     # CU serving (already 0/1)
+  ) %>%
+  filter(y %in% c(0,1), cu_serv %in% c(0,1))
+
+# --- fit simplified logistic model ---
+m_point <- glm(
+  y ~ poly(d_pre, 2, raw = TRUE) + cu_serv,
+  data = pbp2, family = binomial()
+)
+
+summary(m_point)
+
+# --- build table of predicted probabilities for diffs -7..7 ---
+diff_grid <- expand.grid(
+  d_pre = -7:7,
+  cu_serv = c(0,1)
+)
+
+pred_table <- diff_grid %>%
+  mutate(
+    eta = predict(m_point, newdata = diff_grid, type = "link"),
+    p_hat = plogis(eta),
+    cu_serving = ifelse(cu_serv == 1, "Yes", "No")
+  ) %>%
+  select(d_pre, cu_serving, p_hat)
+
+print(pred_table)
+
+
+```
+
+1.  **Define the state space.**\
+    A state is the pre-rally score and server: $$
+    (a,b,s),\quad a=\text{CU points},\; b=\text{opponent points},\; s\in\{\text{CU},\text{Opp}\}.
+    $$ Absorbing if $a\ge T$ and $a-b\ge2$ (CU wins) or $b\ge T$ and $b-a\ge2$ (opp wins), with $T=25$ (or $15$ in the deciding set).
+
+2.  **Estimate point-win probabilities.**\
+    Fit a logistic model for $$
+    p(d,s)=\Pr(\text{CU wins next rally}\mid d,s),
+    $$ where $d=a-b$ (score differential) and $s$ is whether CU is serving.
+
+3.  **Map to transitions.**\
+    From any non-absorbing $(a,b,s)$:
+
+    -   with probability $p(d,s)$ go to $(a+1,b,\text{CU})$\
+    -   with probability $1-p(d,s)$ go to $(a,b+1,\text{Opp})$\
+        (Rally winner serves next.)
+
+4.  **Solve the absorbing Markov chain.**\
+    Let $W(a,b,s)$ be the probability CU wins the set from $(a,b,s)$. Then $$
+    W(a,b,s)=p(d,s)\,W(a+1,b,\mathrm{CU})+\big(1-p(d,s)\big)\,W(a,b+1,\mathrm{Opp}),
+    $$ with $W=1$ in CU-win absorbing states and $W=0$ in CU-loss absorbing states. Compute via memoized recursion (DP).
+
+5.  **Attach live win probabilities.**\
+    For each rally, compute pre-rally $(a,b)$, serving $s$, and $T$; evaluate $W(a,b,s)$ to get pre-rally set win probability.
+
+6.  **Validate & calibrate.**\
+    Use Brier score and reliability plots; check that WP rises after CU-won rallies and falls after losses.
+
+7.  **(Maybe) Extend to match-win probability.**\
+    Embed set-level $W$ in a best-of-five framework, tracking sets won until a team reaches three.
