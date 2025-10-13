@@ -11,6 +11,7 @@ knitr::opts_chunk$set(warning = FALSE)
 knitr::opts_chunk$set(out.width = "60%",fig.align='center')
 ```
 
+
 ## Load Libraries 
 ```{r}
 install.packages("here")   # only once allows us to all call from same space 
@@ -22,8 +23,11 @@ library(tinytex)
 library(dplyr)
 library(ggplot2)
 library(readr)
-library(tibble) #make table
+library(tibble)
 library(here)
+library(ResourceSelection)
+library(randtests)
+library(purrr)
 ```
 
 ## Load Datasets
@@ -84,12 +88,6 @@ na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
 na_count_tbl
 dirty_conference_matches_raw2 <- dirty_conference_matches_raw1 %>%
   na.omit()  # 259250 -> 192550 observations , 26 vars. 
-```
-
-
-#ETHANS WORKFLOW 
-```{r}
-#possible add data filtering before this 
 ```
 
 ```{r}
@@ -169,8 +167,7 @@ points_core <- touches_flagged %>%
 ```
 
 (JUST NOTED: Touches in rally is incorrect due to nature of all-matches data set with "empty" rows)
-
-We collapse many touches into a single rally row. We take last scores to capture the scoreboard after the point, and any() over timeout/sub to mark whether the inter-point stoppage happened following that point.
+-We collapse many touches into a single rally row. We take last scores to capture the scoreboard after the point, and any() over timeout/sub to mark whether the inter-point stoppage happened following that point.
 
 ```{r}
 #add point winner info. 
@@ -228,28 +225,124 @@ points_final <- points_cu %>%
     cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
     final_home_set_score, final_away_set_score,
     won_set,
+   touches_in_rally,   #maybe leave out 
+    timeout_after_point  #maybe leave out
   )
 ```
 
 Final set scores provide outcome context for every rally (like late-set pressure).
-
 ```{r}
 #output dataset
 write_csv(points_final, out_path)
 head(points_final, 10)
 ```
 
+#describe the data structure, dimensionality, variable types, and completeness. 
+Data structure:
+Dimensional:
+Variable Types:
+Completeness:
+
+#Highlight any significant needs to clean or impute the data in order to prepare it for analysis
+Points_final :  27,580 entries, 18 total columns
+Volleyball_points_dataset:  27,580 entries, 16 total columns
+
+
 ## Exploratory Analysis
+```{r}
+# quick overview of data 
+glimpse(points_final)
+summary(points_final)
+
+#unique counts
+points_final %>%
+  summarize(
+    matches = n_distinct(match_id),
+    seasons = n_distinct(season),
+    total_rallies = n(),
+    unique_sets = n_distinct(paste(match_id, set_number))
+  )
+```
+169 matches in 15 seasons with 27580 total rallies and 628 unique sets.
+
+```{r}
+# distribution of final set scores (CU perspective)
+set_scores_cu <- points_final %>%
+  group_by(match_id, set_number) %>%
+  slice_tail(n = 1) %>%   # last rally of each set
+  ungroup() %>%
+  mutate(
+    cu_final = cu_score_end,
+    opp_final = opp_score_end,
+    set_type = ifelse(set_number == 5, "deciding", "non-deciding")
+  )
+
+# histograms
+ggplot(set_scores_cu, aes(x = cu_final)) + 
+  geom_histogram(bins = 12) + 
+  facet_wrap(~ set_type) + 
+  labs(title = "Distribution of CU final set scores", x = "CU points at set end")
+
+#table of common final scores
+set_scores_cu %>%
+  count(cu_final, opp_final) %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  knitr::kable()
+```
+Distribution of points at a sets end is much more concise for CU decding sets versus non-decding sets.
+
+```{r}
+# overall point-winning rates
+points_final %>%
+  summarize(
+    cu_point_pct = mean(cu_point_won, na.rm = TRUE),
+    cu_serv_pct = mean(cu_serving, na.rm = TRUE)
+  )
+
+# side-out success
+points_final %>%
+  mutate(receiving_won = if_else(cu_serving, !cu_point_won, cu_point_won)) %>%
+  summarize(sideout_rate = mean(receiving_won, na.rm = TRUE))
+
+# point-win by serving status
+points_final %>%
+  group_by(cu_serving) %>%
+  summarize(
+    p_win = mean(cu_point_won, na.rm = TRUE),
+    n = n()
+  ) %>% knitr::kable()
+```
+
+CU points won ~50.36% 
+CU serves ~50.19$ 
+Side-out success ~ 58.35%
+We see when CU is not serving we have ~58.75% probability of winning. While when we are serving it drops to ~42.04% probability of winning.
 
 
+```{r}
+#touches_in_rally distribution
+points_final %>%
+  summarize(mean_touches = mean(touches_in_rally, na.rm = TRUE),
+            median_touches = median(touches_in_rally, na.rm = TRUE),
+            max_touches = max(touches_in_rally, na.rm = TRUE))
 
-## Assumptions
+#timeouts distribution by set
+points_final %>%
+  group_by(set_number) %>%
+  summarize(timeouts = sum(timeout_after_point, na.rm = TRUE),
+            rallies = n(),
+            to_per_rally = timeouts / rallies) %>%
+  knitr::kable()
+```
 
 
 #Markov Chain Modeling 
 ```{r}
-pbp <- read_csv("C:/Users/ethan/Downloads/volleyball_points_dataset.csv", show_col_types = FALSE)
+pbp <- readr::read_csv(here("datasets", "volleyball_points_dataset.csv"), show_col_types = FALSE)
+```
 
+```{r}
 # --- derive pre-rally differential from end-of-rally scores ---
 pbp2 <- pbp %>%
   mutate(
@@ -284,8 +377,6 @@ pred_table <- diff_grid %>%
   select(d_pre, cu_serving, p_hat)
 
 print(pred_table)
-
-
 ```
 
 1.  **Define the state space.**\
@@ -318,3 +409,162 @@ print(pred_table)
 
 7.  **(Maybe) Extend to match-win probability.**\
     Embed set-level $W$ in a best-of-five framework, tracking sets won until a team reaches three.
+
+```{r}
+#score-state heatmap + frequency of states 
+score_states <- pbp2 %>%
+  mutate(
+    cu_pre = cu_score_pre,
+    opp_pre = opp_score_pre
+  ) %>%
+  count(cu_pre, opp_pre) %>%
+  ungroup()
+
+ggplot(score_states, aes(x = opp_pre, y = cu_pre, fill = n)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  labs(title = "Frequency of pre-rally score states (CU vs Opp)", x = "Opponent points (pre-rally)", y = "CU points (pre-rally)")
+```
+Shows where most rallies occur, not that useful.
+
+```{r}
+#empirical transition matrix 
+empirical_p <- pbp2 %>%
+  group_by(d_pre, cu_serv) %>%
+  summarize(
+    n = n(),
+    p_emp = mean(y, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+ggplot(empirical_p, aes(x = d_pre, y = p_emp, color = factor(cu_serv))) +
+  geom_point() + geom_smooth(method = "loess", se = FALSE) +
+  labs(title = "Empirical p(next rally | diff, serve)", x = "Score diff (CU - Opp) pre-rally", color = "CU serving")
+```
+
+
+## Assumptions
+#Met/ or not by our model
+Independence & Markov assumption checks
+-We cannot fully "prove" Markov, but we can test if the previous few rallies (beyond pre-rally scores) have additional predictive power.
+```{r}
+#add lagged outcomes and test
+# within match-set grouping, compute last 3 outcomes
+pbp_lags <- pbp2 %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(
+    lag1 = lag(y, 1),
+    lag2 = lag(y, 2),
+    lag3 = lag(y, 3)
+  ) %>%
+  ungroup()
+
+# model with lags
+m_with_lags <- glm(y ~ poly(d_pre, 2, raw = TRUE) + cu_serv + lag1 + lag2 + lag3,
+                   data = pbp_lags, family = binomial())
+
+summary(m_point)       # original
+summary(m_with_lags)   # with lags; check significance of lag terms
+```
+
+The inclusion of lagged rally outcomes (previous 1–3 rallies) did not improve predictive power once score difference and serve status were accounted for. This suggests that rally outcomes are conditionally independent given the current score state, supporting the Markov(1) assumption in our win probability modeling. Good.
+
+
+```{r}
+# unique matches
+match_ids <- unique(pbp2$match_id)
+
+# run runs.test for each match
+runs_list <- map(match_ids, function(mid) {
+  dat <- pbp2 %>% filter(match_id == mid) %>% pull(y)
+  n_wins <- sum(dat == 1, na.rm = TRUE)
+  n_losses <- sum(dat == 0, na.rm = TRUE)
+  
+  if (n_wins > 0 & n_losses > 0) {
+    out <- tryCatch(runs.test(as.numeric(dat)), error = function(e) NULL)
+    if (!is.null(out)) {
+      return(tibble(
+        match_id = mid,
+        n_wins = n_wins,
+        n_losses = n_losses,
+        runs = out$runs,
+        statistic = out$statistic,
+        p_value = out$p.value
+      ))
+    }
+  }
+  # fallback row w/ NAs
+  tibble(
+    match_id = mid,
+    n_wins = n_wins,
+    n_losses = n_losses,
+    runs = NA_real_,
+    statistic = NA_real_,
+    p_value = NA_real_
+  )
+})
+
+#combine results
+runs_clean <- bind_rows(runs_list)
+summary(runs_clean$p_value)
+hist(runs_clean$p_value, main = "Runs Test p-values across matches")
+```
+
+Min.   = 0.00735   (smallest p-value)
+1st Qu.= 0.01300   (25% of p-values are ≤ 0.013)
+Median = 0.01864   (half are ≤ 0.01864)
+Mean   = 0.03543   (average p-value)
+3rd Qu.= 0.04947   (75% of p-values are ≤ 0.049)
+Max.   = 0.08030   (largest p-value)
+NA's   = 166       (runs test couldn’t be computed for 166 cases)
+
+Almost all p-values are very small (most < 0.05). That means the runs test is consistently rejecting the null hypothesis of randomness in rally outcomes. Good. 
+
+## Model calibration 
+```{r}
+# predicted probs from logistic 
+pbp2$pred <- predict(m_point, type = "response")
+
+# Brier score
+brier <- mean((pbp2$y - pbp2$pred)^2)
+brier
+
+# calibration bins
+calib <- pbp2 %>%
+  mutate(bin = ntile(pred, 10)) %>%
+  group_by(bin) %>%
+  summarize(
+    mean_pred = mean(pred),
+    mean_obs = mean(y),
+    n = n()
+  )
+
+ggplot(calib, aes(x = mean_pred, y = mean_obs)) +
+  geom_point() + geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(title = "Calibration plot (deciles of predicted probability)", x = "Mean predicted prob", y = "Observed proportion")
+
+# Hosmer-Lemeshow
+hl <- hoslem.test(pbp2$y, pbp2$pred, g = 10)
+hl
+```
+The Brier score measures average squared error between predicted probabilities and actual outcomes. It ranges from 0 (perfect) to 0.25 for a balanced 50/50 prediction problem (random guessing gives ~0.25). Model’s score (~0.243) is only slightly better than random guessing. Problamatic.
+
+Hosmer–Lemeshow GOF test: 
+Null hypothesis (H₀): The model fits well (predicted probs = observed probs in groups).
+p = 0.35 > 0.05 → Fail to reject H₀.
+No evidence of lack of fit as the model’s predicted probabilities are statistically consistent with the observed data. Good.
+
+The model is calibrated but not with great predictive power. 
+
+```{r}
+#cross validation + temporal holdout 
+train <- pbp2 %>% filter(season <= 2019)
+test  <- pbp2 %>% filter(season >= 2020)
+
+m_train <- glm(y ~ poly(d_pre, 2, raw = TRUE) + cu_serv, data = train, family = binomial())
+test$pred <- predict(m_train, newdata = test, type = "response")
+brier_test <- mean((test$y - test$pred)^2)
+brier_test
+```
+Model’s test Brier = 0.52, which is very poor. Worse than random > 0.25.
