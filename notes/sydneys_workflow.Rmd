@@ -6,37 +6,260 @@ date: "2025-10-02"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.width = "60%",fig.align='center')
 ```
 
 ## Load Libraries 
 ```{r}
+install.packages("here")   # only once allows us to all call from same space 
+```
+```{r}
 library(tidyverse)
+library(knitr)
+library(tinytex) 
 library(dplyr)
 library(ggplot2)
+library(readr)
+library(tibble) #make table
+library(here)
 ```
+
 ## Load Datasets
 ```{r}
-all_matches_CU <- read.csv("datasets/all_matches_CU.csv")                 #551 by 16
-all_matches_opp <- read.csv("datasets/all_matches_opp.csv")               #551 by 16
-all_matches_processed <- read.csv("datasets/all_matches_processed.csv")   #1102 by 16
+all_matches_CU <- readr::read_csv(here("datasets", "all_matches_CU.csv"))                #551 by 16
+all_matches_opp <- readr::read_csv(here("datasets","all_matches_opp.csv"))               #551 by 16
+all_matches_processed <- readr::read_csv(here("datasets","all_matches_processed.csv"))  #1102 by 16
+all_matches <- readr::read_csv(here("datasets","all_matches (1).csv"))                 #269628 by 125 
+```
 
-all_matches_raw <- read.csv("datasets/all_matches_raw.csv")              #269628 by 87
-conference_matches_raw <- read.csv("datasets/conference_matches_raw.csv")   #168769 by 87
-dirty_conference_matches_raw <- read.csv("datasets/dirty_conference_matches_raw.csv")   #259250 by 87
-
-dirty_conference_matches <- read.csv("datasets/dirty_conference_matches.csv")          #259250 by 125
+```{r}
+all_matches_raw <- readr::read_csv(here("datasets","all_matches_raw.csv"))              #269628 by 87
+conference_matches_raw <- readr::read_csv(here("datasets","conference_matches_raw.csv"))   #168769 by 87
+dirty_conference_matches_raw <- readr::read_csv(here("datasets","dirty_conference_matches_raw.csv"))   #259250 by 87
+dirty_conference_matches <- readr::read_csv(here("datasets","dirty_conference_matches.csv"))          #259250 by 125
 ```
 
 
 ## Cleaning + Wrangling Data 
--claim important + useful varaibles to write about report 2
+```{r}
+#ALL MATCHES RAW
+#selecting relevant/important variables
+all_matches_raw1 <- all_matches_raw %>%
+  select(match_id, point_id, time,team, player_number, player_name, player_id, skill, timeout, end_of_set, substitution, point, home_team_score, visiting_team_score, file_line_number, home_p1, home_p2, home_p3, home_p4, home_p5, home_p6, visiting_p1, visiting_p2, visiting_p3, visiting_p4, visiting_p5)  #269628 by 26 vars.
+
+#checking NAs in data
+na_count <- colSums(is.na(all_matches_raw1))
+na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
+na_count_tbl
+#shows us to take out set_code, set_type, start_zone, end_zone
+
+all_matches_raw2 <- all_matches_raw1 %>%
+  na.omit()    #269628 by 26 vars. -> 199758 observations 
+```
+
+```{r}
+#CONFERENCE MATCHES RAW
+conference_matches_raw1 <- conference_matches_raw %>%
+  select(match_id, point_id, time,team, player_number, player_name, player_id, skill, timeout, end_of_set, substitution, point, home_team_score, visiting_team_score, file_line_number, home_p1, home_p2, home_p3, home_p4, home_p5, home_p6, visiting_p1, visiting_p2, visiting_p3, visiting_p4, visiting_p5)
+
+#checking NAs in data
+na_count <- colSums(is.na(conference_matches_raw1))
+na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
+na_count_tbl
+
+conference_matches_raw2 <- conference_matches_raw1 %>%
+  na.omit()  # 168769 -> 125559 observations , 26 vars. 
+```
+
+```{r}
+#DIRTY CONFERENCE MATCHES RAW 
+dirty_conference_matches_raw1 <- dirty_conference_matches_raw %>%
+  select(match_id, point_id, time,team, player_number, player_name, player_id, skill, timeout, end_of_set, substitution, point, home_team_score, visiting_team_score, file_line_number, home_p1, home_p2, home_p3, home_p4, home_p5, home_p6, visiting_p1, visiting_p2, visiting_p3, visiting_p4, visiting_p5)
+
+#checking NAs in data
+na_count <- colSums(is.na(dirty_conference_matches_raw1))
+na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
+na_count_tbl
+dirty_conference_matches_raw2 <- dirty_conference_matches_raw1 %>%
+  na.omit()  # 259250 -> 192550 observations , 26 vars. 
+```
+
+
+#ETHANS WORKFLOW 
+```{r}
+#possible add data filtering before this 
+```
+
+```{r}
+#data inflow + outflow
+#in_path  <- "all_matches"
+in_path <- here::here("datasets", "all_matches (1).csv")
+out_path <- "volleyball_points_dataset.csv"
+```
+
+```{r}
+#touches <- read_csv(in_path, show_col_types = FALSE)
+touches <- readr::read_csv(in_path, show_col_types = FALSE)
+
+order_col <- if ("Unnamed: 0" %in% names(touches)) "Unnamed: 0" else NULL
+
+#touches in correspondence to rally order
+touches_ord <- touches %>%
+  {
+    if (!is.null(order_col)) arrange(., match_id, set_number, .data[[order_col]])
+    else group_by(., match_id, set_number) %>% arrange(row_number(), .by_group = TRUE) %>% ungroup()
+  }
+```
+
+To compress rallies accurately, touches must be sorted in the exact sequence they occurred. We sort by match_id, set_number, and a stable row index so subsequent steps (like detecting score changes) behave correctly.
+
+```{r}
+#add flags for rally IDS + rally-ending scores 
+touches_flagged <- touches_ord %>%
+  group_by(match_id, set_number) %>%
+  mutate(
+    prev_home  = lag(home_team_score),
+    prev_away  = lag(visiting_team_score),
+    rally_end_flag = (home_team_score != prev_home) | (visiting_team_score != prev_away),
+    rally_end_flag = replace_na(rally_end_flag, TRUE),
+    rally_id = cumsum(rally_end_flag)
+  ) %>%
+  ungroup()
+```
+
+Volleyball is rally scoring; each rally ends when the scoreboard moves. By turning score changes into a “flag” and cumulatively summing, every touch is assigned to the rally that produced (or followed) a point.
+
+```{r}
+#function to create binaries (T/F)
+to_logical_vec <- function(x) {
+  if (is.logical(x)) x
+  else if (is.numeric(x)) x != 0
+  else tolower(as.character(x)) %in% c("true","t","yes","y","1")
+}
+```
+
+“Between points” events like timeouts are often recorded right after a point and before the next serve. We’ll roll them up with the rally that just ended (i.e., the point that triggered them).
+
+```{r}
+#collapse touches into rally-level dataset
+points_core <- touches_flagged %>%
+  group_by(match_id, set_number, rally_id) %>%
+  summarise(
+    home_score_end        = last(home_team_score),
+    away_score_end        = last(visiting_team_score),
+    serving_team          = first(serving_team),          
+    touches_in_rally      = n(),
+    team_rotation         = suppressWarnings(as.integer(last(team_rotation))),
+    opp_rotation          = suppressWarnings(as.integer(last(opp_rotation))),
+    score_diff_raw        = suppressWarnings(as.integer(last(score_diff))),
+    timeout_after_point   = any(to_logical_vec(timeout), na.rm = TRUE),
+    substitution_after_point = any(to_logical_vec(substitution), na.rm = TRUE),
+    home_team             = last(home_team),
+    visiting_team         = last(visiting_team),
+    won_set               = last(won_set),
+    date                  = last(date),
+    season                = last(season),
+    conference            = last(conference),
+    .groups = "drop"
+  ) %>%
+  arrange(match_id, set_number, rally_id)
+
+```
+
+(JUST NOTED: Touches in rally is incorrect due to nature of all-matches data set with "empty" rows)
+
+We collapse many touches into a single rally row. We take last scores to capture the scoreboard after the point, and any() over timeout/sub to mark whether the inter-point stoppage happened following that point.
+
+```{r}
+#add point winner info. 
+points_w_winner <- points_core %>%
+  group_by(match_id, set_number) %>%
+  mutate(
+    prev_home_end = lag(home_score_end, default = 0),
+    prev_away_end = lag(away_score_end, default = 0),
+    home_delta    = home_score_end - prev_home_end,
+    away_delta    = away_score_end - prev_away_end,
+    point_winner_team = case_when(
+      home_delta == 1 & away_delta == 0 ~ home_team,
+      away_delta == 1 & home_delta == 0 ~ visiting_team,
+      TRUE ~ NA_character_            
+    )
+  ) %>%
+  ungroup()
+```
+
+Had some problems with timeout booleans. So above is the fix. Exactly one side’s score should increase by 1 at a rally end. Using deltas bypasses missing point_won_by values and avoids problems assigning winners when TO/Sub rows appear.
+
+```{r}
+#CU focused variables 
+points_cu <- points_w_winner %>%
+  mutate(
+    cu_is_home        = home_team == "CU",
+    cu_score_end      = if_else(cu_is_home, home_score_end, away_score_end),
+    opp_score_end     = if_else(cu_is_home, away_score_end, home_score_end),
+    cu_point_won      = point_winner_team == "CU",
+    cu_score_diff_end = cu_score_end - opp_score_end,
+    cu_serving        = serving_team == "CU"
+  )
+
+```
+
+By aligning columns to CU, we can analyze run lengths, in-rally momentum, and timeout efficacy without worrying about home/away flipping your signs.
+
+```{r}
+#final set-level scores 
+set_scores <- touches_flagged %>%
+  group_by(match_id, set_number) %>%
+  summarise(
+    final_home_set_score = max(home_team_score, na.rm = TRUE),
+    final_away_set_score = max(visiting_team_score, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#combination of rally-level + set-level 
+points_final <- points_cu %>%
+  left_join(set_scores, by = c("match_id", "set_number")) %>%
+  select(
+    match_id, date, season, conference,
+    home_team, visiting_team, set_number, rally_id,
+    cu_serving,
+    cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
+    final_home_set_score, final_away_set_score,
+    won_set,
+  )
+```
+
+Final set scores provide outcome context for every rally (like late-set pressure).
+
+```{r}
+#output dataset
+write_csv(points_final, out_path)
+head(points_final, 10)
+```
+
+
+```{r}
+#describe the data structure, dimensionality, variable types, and completeness. 
+
+#Highlight any significant needs to clean or impute the data in order to prepare it for analysis
+```
+
+
+
 
 ## Exploratory Analysis
+
 
 ## Assumptions
 
 
 ## MODELING 
+
+
 #Markov Chain Modeling 
 
+
 #Cluster Analysis 
+
