@@ -4,40 +4,567 @@ output: word_document
 date: "2025-09-11"
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.width = "60%",fig.align='center')
+```
+
 
 ## Load Libraries 
 ```{r}
+install.packages("here")   # only once allows us to all call from same space 
+```
+```{r}
 library(tidyverse)
+library(knitr)
+library(tinytex) 
 library(dplyr)
 library(ggplot2)
+library(readr)
+library(tibble)
+library(here)
+library(ResourceSelection)
+library(randtests)
+library(purrr)
 ```
+
 ## Load Datasets
 ```{r}
-all_matches_CU <- read.csv("datasets/all_matches_CU.csv")
-all_matches_opp <- read.csv("datasets/all_matches_opp.csv")
-all_matches_processed <- read.csv("datasets/all_matches_processed.csv")
-
-all_matches_raw <- read.csv("datasets/all_matches_raw.csv")
-conference_matches_raw <- read.csv("datasets/conference_matches_raw.csv")
-dirty_conference_matches_raw <- read.csv("datasets/dirty_conference_matches_raw.csv")
-
-dirty_conference_matches <- read.csv("datasets/dirty_conference_matches.csv")
+all_matches_CU <- readr::read_csv(here("datasets", "all_matches_CU.csv"))                #551 by 16
+all_matches_opp <- readr::read_csv(here("datasets","all_matches_opp.csv"))               #551 by 16
+all_matches_processed <- readr::read_csv(here("datasets","all_matches_processed.csv"))  #1102 by 16
+all_matches <- readr::read_csv(here("datasets","all_matches (1).csv"))                 #269628 by 125 
 ```
 
+```{r}
+all_matches_raw <- readr::read_csv(here("datasets","all_matches_raw.csv"))              #269628 by 87
+conference_matches_raw <- readr::read_csv(here("datasets","conference_matches_raw.csv"))   #168769 by 87
+dirty_conference_matches_raw <- readr::read_csv(here("datasets","dirty_conference_matches_raw.csv"))   #259250 by 87
+dirty_conference_matches <- readr::read_csv(here("datasets","dirty_conference_matches.csv"))          #259250 by 125
+```
+
+
 ## Cleaning + Wrangling Data 
+```{r}
+#ALL MATCHES RAW
+#selecting relevant/important variables
+all_matches_raw1 <- all_matches_raw %>%
+  select(match_id, point_id, time,team, player_number, player_name, player_id, skill, timeout, end_of_set, substitution, point, home_team_score, visiting_team_score, file_line_number, home_p1, home_p2, home_p3, home_p4, home_p5, home_p6, visiting_p1, visiting_p2, visiting_p3, visiting_p4, visiting_p5)  #269628 by 26 vars.
+
+#checking NAs in data
+na_count <- colSums(is.na(all_matches_raw1))
+na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
+na_count_tbl
+#shows us to take out set_code, set_type, start_zone, end_zone
+
+all_matches_raw2 <- all_matches_raw1 %>%
+  na.omit()    #269628 by 26 vars. -> 199758 observations 
+```
+
+```{r}
+#CONFERENCE MATCHES RAW
+conference_matches_raw1 <- conference_matches_raw %>%
+  select(match_id, point_id, time,team, player_number, player_name, player_id, skill, timeout, end_of_set, substitution, point, home_team_score, visiting_team_score, file_line_number, home_p1, home_p2, home_p3, home_p4, home_p5, home_p6, visiting_p1, visiting_p2, visiting_p3, visiting_p4, visiting_p5)
+
+#checking NAs in data
+na_count <- colSums(is.na(conference_matches_raw1))
+na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
+na_count_tbl
+
+conference_matches_raw2 <- conference_matches_raw1 %>%
+  na.omit()  # 168769 -> 125559 observations , 26 vars. 
+```
+
+```{r}
+#DIRTY CONFERENCE MATCHES RAW 
+dirty_conference_matches_raw1 <- dirty_conference_matches_raw %>%
+  select(match_id, point_id, time,team, player_number, player_name, player_id, skill, timeout, end_of_set, substitution, point, home_team_score, visiting_team_score, file_line_number, home_p1, home_p2, home_p3, home_p4, home_p5, home_p6, visiting_p1, visiting_p2, visiting_p3, visiting_p4, visiting_p5)
+
+#checking NAs in data
+na_count <- colSums(is.na(dirty_conference_matches_raw1))
+na_count_tbl <- enframe(na_count, name = "column", value = "num_NAs")
+na_count_tbl
+dirty_conference_matches_raw2 <- dirty_conference_matches_raw1 %>%
+  na.omit()  # 259250 -> 192550 observations , 26 vars. 
+```
+
+```{r}
+#data inflow + outflow
+#in_path  <- "all_matches"
+in_path <- here::here("datasets", "all_matches (1).csv")
+out_path <- "volleyball_points_dataset.csv"
+```
+
+```{r}
+#touches <- read_csv(in_path, show_col_types = FALSE)
+touches <- readr::read_csv(in_path, show_col_types = FALSE)
+
+order_col <- if ("Unnamed: 0" %in% names(touches)) "Unnamed: 0" else NULL
+
+#touches in correspondence to rally order
+touches_ord <- touches %>%
+  {
+    if (!is.null(order_col)) arrange(., match_id, set_number, .data[[order_col]])
+    else group_by(., match_id, set_number) %>% arrange(row_number(), .by_group = TRUE) %>% ungroup()
+  }
+```
+
+To compress rallies accurately, touches must be sorted in the exact sequence they occurred. We sort by match_id, set_number, and a stable row index so subsequent steps (like detecting score changes) behave correctly.
+
+```{r}
+#add flags for rally IDS + rally-ending scores 
+touches_flagged <- touches_ord %>%
+  group_by(match_id, set_number) %>%
+  mutate(
+    prev_home  = lag(home_team_score),
+    prev_away  = lag(visiting_team_score),
+    rally_end_flag = (home_team_score != prev_home) | (visiting_team_score != prev_away),
+    rally_end_flag = replace_na(rally_end_flag, TRUE),
+    rally_id = cumsum(rally_end_flag)
+  ) %>%
+  ungroup()
+```
+
+Volleyball is rally scoring; each rally ends when the scoreboard moves. By turning score changes into a “flag” and cumulatively summing, every touch is assigned to the rally that produced (or followed) a point.
+
+```{r}
+#function to create binaries (T/F)
+to_logical_vec <- function(x) {
+  if (is.logical(x)) x
+  else if (is.numeric(x)) x != 0
+  else tolower(as.character(x)) %in% c("true","t","yes","y","1")
+}
+```
+
+“Between points” events like timeouts are often recorded right after a point and before the next serve. We’ll roll them up with the rally that just ended (i.e., the point that triggered them).
+
+```{r}
+#collapse touches into rally-level dataset
+points_core <- touches_flagged %>%
+  group_by(match_id, set_number, rally_id) %>%
+  summarise(
+    home_score_end        = last(home_team_score),
+    away_score_end        = last(visiting_team_score),
+    serving_team          = first(serving_team),          
+    touches_in_rally      = n(),
+    team_rotation         = suppressWarnings(as.integer(last(team_rotation))),
+    opp_rotation          = suppressWarnings(as.integer(last(opp_rotation))),
+    score_diff_raw        = suppressWarnings(as.integer(last(score_diff))),
+    timeout_after_point   = any(to_logical_vec(timeout), na.rm = TRUE),
+    substitution_after_point = any(to_logical_vec(substitution), na.rm = TRUE),
+    home_team             = last(home_team),
+    visiting_team         = last(visiting_team),
+    won_set               = last(won_set),
+    date                  = last(date),
+    season                = last(season),
+    conference            = last(conference),
+    .groups = "drop"
+  ) %>%
+  arrange(match_id, set_number, rally_id)
+
+```
+
+(JUST NOTED: Touches in rally is incorrect due to nature of all-matches data set with "empty" rows)
+-We collapse many touches into a single rally row. We take last scores to capture the scoreboard after the point, and any() over timeout/sub to mark whether the inter-point stoppage happened following that point.
+
+```{r}
+#add point winner info. 
+points_w_winner <- points_core %>%
+  group_by(match_id, set_number) %>%
+  mutate(
+    prev_home_end = lag(home_score_end, default = 0),
+    prev_away_end = lag(away_score_end, default = 0),
+    home_delta    = home_score_end - prev_home_end,
+    away_delta    = away_score_end - prev_away_end,
+    point_winner_team = case_when(
+      home_delta == 1 & away_delta == 0 ~ home_team,
+      away_delta == 1 & home_delta == 0 ~ visiting_team,
+      TRUE ~ NA_character_            
+    )
+  ) %>%
+  ungroup()
+```
+
+Had some problems with timeout booleans. So above is the fix. Exactly one side’s score should increase by 1 at a rally end. Using deltas bypasses missing point_won_by values and avoids problems assigning winners when TO/Sub rows appear.
+
+```{r}
+#CU focused variables 
+points_cu <- points_w_winner %>%
+  mutate(
+    cu_is_home        = home_team == "CU",
+    cu_score_end      = if_else(cu_is_home, home_score_end, away_score_end),
+    opp_score_end     = if_else(cu_is_home, away_score_end, home_score_end),
+    cu_point_won      = point_winner_team == "CU",
+    cu_score_diff_end = cu_score_end - opp_score_end,
+    cu_serving        = serving_team == "CU"
+  )
+
+```
+
+By aligning columns to CU, we can analyze run lengths, in-rally momentum, and timeout efficacy without worrying about home/away flipping your signs.
+
+```{r}
+#final set-level scores 
+set_scores <- touches_flagged %>%
+  group_by(match_id, set_number) %>%
+  summarise(
+    final_home_set_score = max(home_team_score, na.rm = TRUE),
+    final_away_set_score = max(visiting_team_score, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#combination of rally-level + set-level 
+points_final <- points_cu %>%
+  left_join(set_scores, by = c("match_id", "set_number")) %>%
+  select(
+    match_id, date, season, conference,
+    home_team, visiting_team, set_number, rally_id,
+    cu_serving,
+    cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
+    final_home_set_score, final_away_set_score,
+    won_set,
+   touches_in_rally,   #maybe leave out 
+    timeout_after_point  #maybe leave out
+  )
+```
+
+Final set scores provide outcome context for every rally (like late-set pressure).
+```{r}
+#output dataset
+write_csv(points_final, out_path)
+head(points_final, 10)
+```
+
+#describe the data structure, dimensionality, variable types, and completeness. 
+Data structure:
+Dimensional:
+Variable Types:
+Completeness:
+
+#Highlight any significant needs to clean or impute the data in order to prepare it for analysis
+Points_final :  27,580 entries, 18 total columns
+Volleyball_points_dataset:  27,580 entries, 16 total columns
 
 
 ## Exploratory Analysis
+```{r}
+# quick overview of data 
+glimpse(points_final)
+summary(points_final)
+
+#unique counts
+points_final %>%
+  summarize(
+    matches = n_distinct(match_id),
+    seasons = n_distinct(season),
+    total_rallies = n(),
+    unique_sets = n_distinct(paste(match_id, set_number))
+  )
+```
+169 matches in 15 seasons with 27580 total rallies and 628 unique sets.
+
+```{r}
+# distribution of final set scores (CU perspective)
+set_scores_cu <- points_final %>%
+  group_by(match_id, set_number) %>%
+  slice_tail(n = 1) %>%   # last rally of each set
+  ungroup() %>%
+  mutate(
+    cu_final = cu_score_end,
+    opp_final = opp_score_end,
+    set_type = ifelse(set_number == 5, "deciding", "non-deciding")
+  )
+
+# histograms
+ggplot(set_scores_cu, aes(x = cu_final)) + 
+  geom_histogram(bins = 12) + 
+  facet_wrap(~ set_type) + 
+  labs(title = "Distribution of CU final set scores", x = "CU points at set end")
+
+#table of common final scores
+set_scores_cu %>%
+  count(cu_final, opp_final) %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  knitr::kable()
+```
+Distribution of points at a sets end is much more concise for CU decding sets versus non-decding sets.
+
+```{r}
+# overall point-winning rates
+points_final %>%
+  summarize(
+    cu_point_pct = mean(cu_point_won, na.rm = TRUE),
+    cu_serv_pct = mean(cu_serving, na.rm = TRUE)
+  )
+
+# side-out success
+points_final %>%
+  mutate(receiving_won = if_else(cu_serving, !cu_point_won, cu_point_won)) %>%
+  summarize(sideout_rate = mean(receiving_won, na.rm = TRUE))
+
+# point-win by serving status
+points_final %>%
+  group_by(cu_serving) %>%
+  summarize(
+    p_win = mean(cu_point_won, na.rm = TRUE),
+    n = n()
+  ) %>% knitr::kable()
+```
+
+CU points won ~50.36% 
+CU serves ~50.19$ 
+Side-out success ~ 58.35%
+We see when CU is not serving we have ~58.75% probability of winning. While when we are serving it drops to ~42.04% probability of winning.
+
+
+```{r}
+#touches_in_rally distribution
+points_final %>%
+  summarize(mean_touches = mean(touches_in_rally, na.rm = TRUE),
+            median_touches = median(touches_in_rally, na.rm = TRUE),
+            max_touches = max(touches_in_rally, na.rm = TRUE))
+
+#timeouts distribution by set
+points_final %>%
+  group_by(set_number) %>%
+  summarize(timeouts = sum(timeout_after_point, na.rm = TRUE),
+            rallies = n(),
+            to_per_rally = timeouts / rallies) %>%
+  knitr::kable()
+```
+
+
+#Markov Chain Modeling 
+```{r}
+pbp <- readr::read_csv(here("datasets", "volleyball_points_dataset.csv"), show_col_types = FALSE)
+```
+
+```{r}
+# --- derive pre-rally differential from end-of-rally scores ---
+pbp2 <- pbp %>%
+  mutate(
+    y = as.integer(cu_point_won),        # outcome
+    cu_score_pre  = cu_score_end  - y,   # pre-rally CU score
+    opp_score_pre = opp_score_end - (1L - y), # pre-rally opp score
+    d_pre = cu_score_pre - opp_score_pre,
+    cu_serv = as.integer(cu_serving)     # CU serving (already 0/1)
+  ) %>%
+  filter(y %in% c(0,1), cu_serv %in% c(0,1))
+
+# --- fit simplified logistic model ---
+m_point <- glm(
+  y ~ poly(d_pre, 2, raw = TRUE) + cu_serv,
+  data = pbp2, family = binomial()
+)
+
+summary(m_point)
+
+# --- build table of predicted probabilities for diffs -7..7 ---
+diff_grid <- expand.grid(
+  d_pre = -7:7,
+  cu_serv = c(0,1)
+)
+
+pred_table <- diff_grid %>%
+  mutate(
+    eta = predict(m_point, newdata = diff_grid, type = "link"),
+    p_hat = plogis(eta),
+    cu_serving = ifelse(cu_serv == 1, "Yes", "No")
+  ) %>%
+  select(d_pre, cu_serving, p_hat)
+
+print(pred_table)
+```
+
+1.  **Define the state space.**\
+    A state is the pre-rally score and server: $$
+    (a,b,s),\quad a=\text{CU points},\; b=\text{opponent points},\; s\in\{\text{CU},\text{Opp}\}.
+    $$ Absorbing if $a\ge T$ and $a-b\ge2$ (CU wins) or $b\ge T$ and $b-a\ge2$ (opp wins), with $T=25$ (or $15$ in the deciding set).
+
+2.  **Estimate point-win probabilities.**\
+    Fit a logistic model for $$
+    p(d,s)=\Pr(\text{CU wins next rally}\mid d,s),
+    $$ where $d=a-b$ (score differential) and $s$ is whether CU is serving.
+
+3.  **Map to transitions.**\
+    From any non-absorbing $(a,b,s)$:
+
+    -   with probability $p(d,s)$ go to $(a+1,b,\text{CU})$\
+    -   with probability $1-p(d,s)$ go to $(a,b+1,\text{Opp})$\
+        (Rally winner serves next.)
+
+4.  **Solve the absorbing Markov chain.**\
+    Let $W(a,b,s)$ be the probability CU wins the set from $(a,b,s)$. Then $$
+    W(a,b,s)=p(d,s)\,W(a+1,b,\mathrm{CU})+\big(1-p(d,s)\big)\,W(a,b+1,\mathrm{Opp}),
+    $$ with $W=1$ in CU-win absorbing states and $W=0$ in CU-loss absorbing states. Compute via memoized recursion (DP).
+
+5.  **Attach live win probabilities.**\
+    For each rally, compute pre-rally $(a,b)$, serving $s$, and $T$; evaluate $W(a,b,s)$ to get pre-rally set win probability.
+
+6.  **Validate & calibrate.**\
+    Use Brier score and reliability plots; check that WP rises after CU-won rallies and falls after losses.
+
+7.  **(Maybe) Extend to match-win probability.**\
+    Embed set-level $W$ in a best-of-five framework, tracking sets won until a team reaches three.
+
+```{r}
+#score-state heatmap + frequency of states 
+score_states <- pbp2 %>%
+  mutate(
+    cu_pre = cu_score_pre,
+    opp_pre = opp_score_pre
+  ) %>%
+  count(cu_pre, opp_pre) %>%
+  ungroup()
+
+ggplot(score_states, aes(x = opp_pre, y = cu_pre, fill = n)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  labs(title = "Frequency of pre-rally score states (CU vs Opp)", x = "Opponent points (pre-rally)", y = "CU points (pre-rally)")
+```
+Shows where most rallies occur, not that useful.
+
+```{r}
+#empirical transition matrix 
+empirical_p <- pbp2 %>%
+  group_by(d_pre, cu_serv) %>%
+  summarize(
+    n = n(),
+    p_emp = mean(y, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+ggplot(empirical_p, aes(x = d_pre, y = p_emp, color = factor(cu_serv))) +
+  geom_point() + geom_smooth(method = "loess", se = FALSE) +
+  labs(title = "Empirical p(next rally | diff, serve)", x = "Score diff (CU - Opp) pre-rally", color = "CU serving")
+```
+
 
 ## Assumptions
+#Met/ or not by our model
+Independence & Markov assumption checks
+-We cannot fully "prove" Markov, but we can test if the previous few rallies (beyond pre-rally scores) have additional predictive power.
+```{r}
+#add lagged outcomes and test
+# within match-set grouping, compute last 3 outcomes
+pbp_lags <- pbp2 %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(
+    lag1 = lag(y, 1),
+    lag2 = lag(y, 2),
+    lag3 = lag(y, 3)
+  ) %>%
+  ungroup()
+
+# model with lags
+m_with_lags <- glm(y ~ poly(d_pre, 2, raw = TRUE) + cu_serv + lag1 + lag2 + lag3,
+                   data = pbp_lags, family = binomial())
+
+summary(m_point)       # original
+summary(m_with_lags)   # with lags; check significance of lag terms
+```
+
+The inclusion of lagged rally outcomes (previous 1–3 rallies) did not improve predictive power once score difference and serve status were accounted for. This suggests that rally outcomes are conditionally independent given the current score state, supporting the Markov(1) assumption in our win probability modeling. Good.
 
 
-## MODELING 
-#Markov Chain Modeling 
+```{r}
+# unique matches
+match_ids <- unique(pbp2$match_id)
 
-#Cluster Analysis 
+# run runs.test for each match
+runs_list <- map(match_ids, function(mid) {
+  dat <- pbp2 %>% filter(match_id == mid) %>% pull(y)
+  n_wins <- sum(dat == 1, na.rm = TRUE)
+  n_losses <- sum(dat == 0, na.rm = TRUE)
+  
+  if (n_wins > 0 & n_losses > 0) {
+    out <- tryCatch(runs.test(as.numeric(dat)), error = function(e) NULL)
+    if (!is.null(out)) {
+      return(tibble(
+        match_id = mid,
+        n_wins = n_wins,
+        n_losses = n_losses,
+        runs = out$runs,
+        statistic = out$statistic,
+        p_value = out$p.value
+      ))
+    }
+  }
+  # fallback row w/ NAs
+  tibble(
+    match_id = mid,
+    n_wins = n_wins,
+    n_losses = n_losses,
+    runs = NA_real_,
+    statistic = NA_real_,
+    p_value = NA_real_
+  )
+})
 
+#combine results
+runs_clean <- bind_rows(runs_list)
+summary(runs_clean$p_value)
+hist(runs_clean$p_value, main = "Runs Test p-values across matches")
+```
 
+Min.   = 0.00735   (smallest p-value)
+1st Qu.= 0.01300   (25% of p-values are ≤ 0.013)
+Median = 0.01864   (half are ≤ 0.01864)
+Mean   = 0.03543   (average p-value)
+3rd Qu.= 0.04947   (75% of p-values are ≤ 0.049)
+Max.   = 0.08030   (largest p-value)
+NA's   = 166       (runs test couldn’t be computed for 166 cases)
 
+Almost all p-values are very small (most < 0.05). That means the runs test is consistently rejecting the null hypothesis of randomness in rally outcomes. Good. 
 
+## Model calibration 
+```{r}
+# predicted probs from logistic 
+pbp2$pred <- predict(m_point, type = "response")
 
+# Brier score
+brier <- mean((pbp2$y - pbp2$pred)^2)
+brier
+
+# calibration bins
+calib <- pbp2 %>%
+  mutate(bin = ntile(pred, 10)) %>%
+  group_by(bin) %>%
+  summarize(
+    mean_pred = mean(pred),
+    mean_obs = mean(y),
+    n = n()
+  )
+
+ggplot(calib, aes(x = mean_pred, y = mean_obs)) +
+  geom_point() + geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(title = "Calibration plot (deciles of predicted probability)", x = "Mean predicted prob", y = "Observed proportion")
+
+# Hosmer-Lemeshow
+hl <- hoslem.test(pbp2$y, pbp2$pred, g = 10)
+hl
+```
+The Brier score measures average squared error between predicted probabilities and actual outcomes. It ranges from 0 (perfect) to 0.25 for a balanced 50/50 prediction problem (random guessing gives ~0.25). Model’s score (~0.243) is only slightly better than random guessing. Problamatic.
+
+Hosmer–Lemeshow GOF test: 
+Null hypothesis (H₀): The model fits well (predicted probs = observed probs in groups).
+p = 0.35 > 0.05 → Fail to reject H₀.
+No evidence of lack of fit as the model’s predicted probabilities are statistically consistent with the observed data. Good.
+
+The model is calibrated but not with great predictive power. 
+
+```{r}
+#cross validation + temporal holdout 
+train <- pbp2 %>% filter(season <= 2019)
+test  <- pbp2 %>% filter(season >= 2020)
+
+m_train <- glm(y ~ poly(d_pre, 2, raw = TRUE) + cu_serv, data = train, family = binomial())
+test$pred <- predict(m_train, newdata = test, type = "response")
+brier_test <- mean((test$y - test$pred)^2)
+brier_test
+```
+Model’s test Brier = 0.52, which is very poor. Worse than random > 0.25.
