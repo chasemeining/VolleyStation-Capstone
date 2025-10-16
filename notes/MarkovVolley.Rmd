@@ -23,7 +23,7 @@ knitr::opts_chunk$set(out.width = "60%",fig.align='center')
 ```
 
 ```{r}
-pbp <- read_csv("C:/Users/ethan/Downloads/volleyball_points_dataset.csv", show_col_types = FALSE)
+# pbp <- read_csv("datasets/volleyball_points_dataset.csv", show_col_types = FALSE)
 
 # --- derive pre-rally differential from end-of-rally scores ---
 pbp2 <- pbp %>%

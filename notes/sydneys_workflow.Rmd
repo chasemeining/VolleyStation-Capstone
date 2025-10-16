@@ -13,7 +13,9 @@ knitr::opts_chunk$set(out.width = "60%",fig.align='center')
 
 ## Load Libraries 
 ```{r}
-install.packages("here")   # only once allows us to all call from same space 
+# install.packages("here")   # only once allows us to all call from same space 
+# install.packages("ResourceSelection")
+# install.packages("randtests")
 ```
 ```{r}
 library(tidyverse)
@@ -34,7 +36,7 @@ library(purrr)
 all_matches_CU <- readr::read_csv(here("datasets", "all_matches_CU.csv"))                #551 by 16
 all_matches_opp <- readr::read_csv(here("datasets","all_matches_opp.csv"))               #551 by 16
 all_matches_processed <- readr::read_csv(here("datasets","all_matches_processed.csv"))  #1102 by 16
-all_matches <- readr::read_csv(here("datasets","all_matches (1).csv"))                 #269628 by 125 
+all_matches <- readr::read_csv(here("datasets","all_matches.csv"))                 #269628 by 125 
 ```
 
 ```{r}
