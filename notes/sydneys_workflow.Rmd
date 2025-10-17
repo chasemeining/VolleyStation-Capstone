@@ -30,6 +30,8 @@ library(ResourceSelection)
 library(randtests)
 library(purrr)
 library(stringr)
+library(mgcv)      # for GAM
+library(glmmTMB)   # for mixed-effects logistic regression
 ```
 
 ## Load Datasets
@@ -94,6 +96,7 @@ dirty_conference_matches_raw2 <- dirty_conference_matches_raw1 %>%
 ```
 
 ##MAIN DATA CLEANING 
+#add encoding set type: non-deciding (to 25) vs. deciding (to 15) + match state: which set number (1–5), sets won/lost so far.
 ```{r}
 #data inflow + outflow
 #in_path  <- "all_matches"
@@ -293,8 +296,16 @@ Final set scores provide outcome context for every rally (like late-set pressure
 #output dataset
 write_csv(points_final, out_path)
 head(points_final, 10)
+
+points <- points_final %>%
+  na.omit()
 ```
 
+```{r}
+#export to github
+readr::write_csv(points_final, "points_final.csv")
+readr::write_csv(points_final, "points.csv")
+```
 
 #describe the data structure, dimensionality, variable types, and completeness. 
 Points_final :  27,580 entries, 18 total columns
@@ -437,17 +448,13 @@ points_final %>%
 
 
 ```{r}
+#FINAL DATASET
 points <- points_final %>%
   na.omit() #27580 obs -> 23916 obs. to get zero NAs, option
 ```
 
+##OVERALL MARKOV MODELING PROCESS
 ## Sydneys attempt at markov chain modeling 
-```{r}
-library(dplyr)
-library(mgcv)      # for GAM
-library(glmmTMB)   # for mixed-effects logistic regression
-```
-
 ```{r}
 #predictors
 points2 <- points %>%
@@ -503,18 +510,6 @@ pred_table <- diff_grid %>%
 
 print(pred_table)
 ```
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -778,8 +773,8 @@ This is expected, given that only score differential and serving status were use
 
 ```{r}
 #cross validation + temporal holdout 
-train <- pbp2 %>% filter(season <= 2019)
-test  <- pbp2 %>% filter(season >= 2020)
+train <- pbp2 %>% filter(season <= 19)
+test  <- pbp2 %>% filter(season >= 20)
 
 m_train <- glm(y ~ poly(d_pre, 2, raw = TRUE) + cu_serv, data = train, family = binomial())
 test$pred <- predict(m_train, newdata = test, type = "response")
