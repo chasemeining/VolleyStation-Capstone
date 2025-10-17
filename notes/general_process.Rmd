@@ -1,0 +1,160 @@
+---
+title: "general_process"
+output: word_document
+date: "2025-10-17"
+---
+
+*REMINDER*
+Research Questions 
+~Are there high-leverage scores?
+~Are there ways of grouping scores together into discrete categories by their win probabilities?
+~How do win probabilities differ between non-deciding sets and deciding sets?
+~Bonus: the data set contains actual time-outs called. How well are coaches utilizing their timeouts? + substitutions 
+-BIG QUESTION: How do win probabilities change as we go through different scores and through different sets?
+GOAL: a comprehensive visual of the change in win probability, the new current win probability 
+
+
+## TO DO
+-I THINK WE SHOULD BE CONCISE IN NAMING VARIABLES something_point, something_rally: should choose one to be consistent 
+-are we going to do anything w/ deciding, undecided sets 
+
+-27580 obs -> 23916 obs. to get zero NAs, to use for modeling 
+
+
+#Data Cleaning 
+What is our final dataset??
+
+-volleyball_points_dataset, points_final, points
+
+Volleyball_points_dataset:  27,580 entries, 16 total columns
+variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set
+
+Points_final :  27,580 entries, 18 total columns
+variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set, touchs_in_rally, timeout_after_point
+
+NEW POINTS_FINAL : same 27,580 entries, but NOW 20 variables (adding 2 more, may want to explore aswell)
+Added Variables: substitution_after_point, won_match_rally
+
+FINAL DATASET??
+points 23916 observations 20 variables, has zero NAs, option
+
+-should add deciding/non-decding sets as a variable !!
+
+
+##Exploratory Analysis 
+General Stats:
+CU points wins ~50.36% of all points, regardless of serving.
+CU served ~50.19% of the rallies, roughly an equal distribution.
+
+Side-out success ~ 58.35%
+CU wins ~ 58.35% of points when receiving the serve(side-out success).
+
+CU wins ~42.04% of points when serving.
+CU wins ~58.75% of points when receiving the serve.
+
+
+##Markov Chain Modeling 
+1.  **Define the state space.**\
+    A state is the pre-rally score and server: $$
+    (a,b,s),\quad a=\text{CU points},\; b=\text{opponent points},\; s\in\{\text{CU},\text{Opp}\}.
+    $$ Absorbing if $a\ge T$ and $a-b\ge2$ (CU wins) or $b\ge T$ and $b-a\ge2$ (opp wins), with $T=25$ (or $15$ in the deciding set).
+
+2.  **Estimate point-win probabilities.**\
+    Fit a logistic model for $$
+    p(d,s)=\Pr(\text{CU wins next rally}\mid d,s),
+    $$ where $d=a-b$ (score differential) and $s$ is whether CU is serving.
+
+3.  **Map to transitions.**\
+    From any non-absorbing $(a,b,s)$:
+
+    -   with probability $p(d,s)$ go to $(a+1,b,\text{CU})$\
+    -   with probability $1-p(d,s)$ go to $(a,b+1,\text{Opp})$\
+        (Rally winner serves next.)
+
+4.  **Solve the absorbing Markov chain.**\
+    Let $W(a,b,s)$ be the probability CU wins the set from $(a,b,s)$. Then $$
+    W(a,b,s)=p(d,s)\,W(a+1,b,\mathrm{CU})+\big(1-p(d,s)\big)\,W(a,b+1,\mathrm{Opp}),
+    $$ with $W=1$ in CU-win absorbing states and $W=0$ in CU-loss absorbing states. Compute via memoized recursion (DP).
+
+5.  **Attach live win probabilities.**\
+    For each rally, compute pre-rally $(a,b)$, serving $s$, and $T$; evaluate $W(a,b,s)$ to get pre-rally set win probability.
+
+6.  **Validate & calibrate.**\
+    Use Brier score and reliability plots; check that WP rises after CU-won rallies and falls after losses.
+
+7.  **(Maybe) Extend to match-win probability.**\
+    Embed set-level $W$ in a best-of-five framework, tracking sets won until a team reaches three.
+
+More Markov.....
+-tranistion prob -> absrobing probs -> validation checks
+
+##Model Building Ideas to add to Logstic Regression
+-Include more predictors
+-Use more flexible models
+~Quadratic term (poly(d_pre,2)), natural splines, GAMs
+-Incorporate rally-level momentum
+~Could include previous point winner streak or CU run length to model momentum effects.
+-Account for random effects
+~Could include match-level random effect:
+-Predict probabilities beyond the observed range
+~Could extend to full range of score differentials to cover blowouts or rare cases.
+-interaction terms
+- team-specific random slopes
+-Bayesian hierarchical logistic regression for full posterior probabilities.
+
+
+## Clustering 
+Clustering models could further refine the Markov approach by capturing differences across matches or non-randomness beyond score/serve effects.
+
+-Collect win probabilities across all score states
+-Define distance metric
+-Apply clustering method: use SALSO or k-means/hierarchical clustering to group score states into categories, can tune number of clusters with silhouette score or stability checks
+-Interpret clusters: map clustered states back onto volleyball scoreboards to highlight “high-leverage” regions 
+
+
+##Assumptions Met
+Assumptions 
+
+-Independence was checked in regard to Markov assumptions computing lags to  Markov(1) assumption. The probability of winning the next rally depends only on the current score state and which team is serving (not on older history). We test this empirically by adding lagged outcomes to the logistic model and with runs tests; any significant lag effects indicate departures from Markov(1). (Testing lagged outcomes and runs tests helps justify the Markov(1) assumption.)
+
+-Conditional independence of rallies. Conditional on modeled state (score and serve), rally outcomes are assumed independent. Violations (e.g., long momentum runs) may bias transition estimates.
+
+-Stationarity within set type. We assume transition probabilities are stable within set types (non-deciding sets vs deciding sets) and within the season range analyzed. We check this by stratifying by season and set type and using temporal holdouts.
+
+-Model form. The logistic model (p(d, s)) with polynomial in score differential and serving indicator captures the dominant relationship between state and next-rally outcome. We verify goodness-of-fit via Brier score, calibration plots, and Hosmer–Lemeshow test.
+
+-CU as representative. Results from CU matches may not generalize to all collegiate teams — we acknowledge limited external validity.
+
+-(Model calibration: Brier / calibration plot / H-L test)- These support assumptions about model correctness and fit.
+
+
+
+
+
+##Model Validation (training/testing)
+-Split into train/test by match to check predictive accuracy.
+-Could calculate ROC, AUC, Brier score to see if model predicts rally outcomes well.
+- reliability plots; check that WP rises after CU-won rallies and falls after losses.
+-brier score, AUC, log loss, confusion matrix : caliberation (reliabilty)
+-Hosmer-Lemeshow test using the package resourcesselection 
+-Cross-validation that respects matches (group CV), Don’t randomly split rallies — use grouped CV by match_id (leave-one-match-out or grouped k-fold).If LOMO is slow, use group k-fold (e.g., 5 folds grouped by match) 
+-Compare observed vs predicted transition counts (Markov goodness-of-fit)
+-Markov-level validation: simulate matches and compare distributions (most important Markov-specific check)
+
+
+##final output plots, graphics 
+-Win probability heatmaps: create score heatmaps for non-deciding and deciding sets.Show probability gradients across scores.
+-Cluster visualizations: assign colors to each cluster and overlay on the heatmap + highlight regions where single points cause big win probability swings.
+-Comparative analysis: distribution of cluster categories between deciding vs. non-deciding sets. Identify which scores consistently emerge as “high leverage.”
+
+##Reporting & Interpretation
+-Summarize key findings
+-Practical implications
+-Limitations
+
+
+
+NOTES
+-not using timeouts, substitutions, rotations (still like could we tho)
+-want to use Markov chains for win probabilities by different points 
+-then use clustering to group different scores that have similar win probabilities
