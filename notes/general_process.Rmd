@@ -12,7 +12,6 @@ Research Questions
 -BIG QUESTION: How do win probabilities change as we go through different scores and through different sets? (+ overall match)
 GOAL: a comprehensive visual of the change in win probability, the new current win probability 
 
-
 ##Data Cleaning 
 Points_final: 27580, 30 variables 
 variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally

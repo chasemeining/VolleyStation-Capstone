@@ -80,7 +80,8 @@ touches_flagged <- touches_ord %>%
     rally_end_flag = (home_team_score != prev_home) | (visiting_team_score != prev_away),
     rally_end_flag = replace_na(rally_end_flag, TRUE),
     rally_id = cumsum(rally_end_flag),
-    match_end_flag = last(to_logical_vec(won_match))  # NEW: indicates if this match was won by the "home" team 
+    match_end_flag = as.logical(last(won_match)) 
+    #match_end_flag = last(to_logical_vec(won_match))  # NEW: indicates if this match was won by the "home" team 
     #TO LOOK AT WHOLE MATCH WIN PROB NOT JUST RALLY/SETS
   ) %>%
   ungroup()
@@ -200,7 +201,6 @@ points_cu <- points_cu %>%
   )
 ```
 
-*may not use below but good to have.
 ```{r}
 #momentum/clustering variables (detect run-length effects)
 points_cu <- points_cu %>%
@@ -474,17 +474,23 @@ points_final %>%
        x = "Opponent Score", y = "CU Score", fill = "Win Prob")
 ```
 
+pbp dataset 
+variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
+
+pbp2 dataset 
+-adds y and cu_serve
 
 ##Markov Modeling Outcomes (Ethans w/ Sydneys new dataset)
+*Use points dataset for modeling*.
 ```{r}
 pbp <- points
 
 pbp2 <- pbp %>%
   mutate(
     y  = as.integer(cu_point_won),          #1 if CU won rally, 0 otherwise
-    cu_score_pre  = cu_score_end  - y,
-    opp_score_pre = opp_score_end - (1L - y),
-    d_pre = cu_score_pre - opp_score_pre,   #Score differential before rall
+    #cu_score_pre  = cu_score_end  - y,
+    #opp_score_pre = opp_score_end - (1L - y),
+    #d_pre = cu_score_pre - opp_score_pre,   #Score differential before rally
     cu_serv = as.integer(cu_serving)
   ) %>%
   filter(y %in% c(0,1), cu_serv %in% c(0,1)) %>%
@@ -526,9 +532,10 @@ p_hat <- (function(beta) {
   b1 <- unname(beta["d_pre"])
   b2 <- unname(beta["I(d_pre^2)"])
   b3 <- unname(beta["cu_serv"])
+  #b4 <- unname(beta["run_length"])
   function(d_pre, cu_serv){
     d <- clamp(d_pre, -CLAMP_DIFF, CLAMP_DIFF)
-    eta <- b0 + b1*d + b2*(d^2) + b3*as.numeric(cu_serv)
+    eta <- b0 + b1*d + b2*(d^2) + b3*as.numeric(cu_serv) 
     plogis(eta)
   }
 })(coef(m_point))
@@ -776,6 +783,7 @@ dplyr::glimpse(state_df)
 ## RESEARCH QUESTIONS
 #Q1: Are there high-leverage scores?
 ```{r}
+#or use pbp2
 points <- points %>%
   mutate(
     win_prob_before = get_set_win_prob(cu_score_pre, opp_score_pre, as.integer(cu_serving)),
@@ -829,6 +837,10 @@ points_final %>%
 
 
 ##Q4 BIG QUESTION: How do win probabilities change as we go through different scores and through different sets? (+ overall match)
+
+First need diagnostic tests to know our model meets assumptions.
+Then model validation/testing of Markov chain model.
+Then final plotting + graphics + interpetation of results.
 
 #Diagnostic Testing 
 A. Logistic Regression (Rally-Level Markov Model) Diagnostics
