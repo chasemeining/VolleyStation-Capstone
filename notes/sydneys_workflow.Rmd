@@ -96,7 +96,6 @@ dirty_conference_matches_raw2 <- dirty_conference_matches_raw1 %>%
 ```
 
 ##MAIN DATA CLEANING 
-#add encoding set type: non-deciding (to 25) vs. deciding (to 15) + match state: which set number (1–5), sets won/lost so far.
 ```{r}
 #data inflow + outflow
 #in_path  <- "all_matches"
@@ -329,8 +328,6 @@ NEW POINTS dataset: same 23916 entries, 20 variables (just NO NAs)
 Volleyball_points_dataset:  27,580 entries, 16 total columns
 variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set
 
-## I THINK WE SHOULD BE CONCISE IN NAMING VARIABLES someting_point , something_rally : should choose one to be consisent 
-
 ## Exploratory Analysis
 ```{r}
 # quick overview of data 
@@ -373,7 +370,7 @@ set_scores_cu %>%
   head(10) %>%
   knitr::kable()
 ```
-Distribution of points at a sets end is much more concise for CU decding sets versus non-decding sets.
+Non-deciding sets have a greater number of sets with a) greater distribution of points at the sets end b) greater count of sets at a higher (more likely a win) # of points.
 
 ```{r}
 #Basic summary stats
@@ -420,7 +417,6 @@ points_final %>%
             to_per_rally = timeouts / rallies) %>%
   knitr::kable()
 ```
-
 
 ```{r}
 #Distribution of substitutions per rally
@@ -838,6 +834,98 @@ ggplot(calib, aes(mean_pred, mean_obs, size = n)) +
 After randomly splitting rallies into training (80%) and testing (20%) sets, the model achieved an out-of-sample Brier score of 0.24, indicating modest but consistent predictive accuracy.
 This value is only slightly better than the 0.25 baseline expected for random guessing, which aligns with the limited information available in rally-level predictors (score differential and serving status).
 The model remains well-calibrated and provides a realistic foundation for constructing transition probabilities in our Markov chain win-probability framework.
+
+
+##ANOTHER ATTEMPT
+##MARKOV MODELING PROCESS (SYDNEY)
+```{r}
+data_for_mc <- points
+```
+
+```{r}
+#define rally importance + closeness
+data_for_mc <- data_for_mc %>%
+  mutate(
+    rally_importance = case_when(
+      cu_score_end >= 20 | opp_score_end >= 20 ~ "late_set",
+      TRUE ~ "early_mid_set"
+    ),
+    close_score = abs(cu_score_diff_end) <= 2
+  )
+
+#compute pre-rally score difference 
+data_for_mc <- data_for_mc %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(
+    d_pre = lag(cu_score_diff_end, default = 0)  # score difference before rally
+  ) %>%
+  ungroup()
+```
+
+1. Define Markov States for the Markov Chain
+```{r}
+data_for_mc <- data_for_mc %>%
+  mutate(
+    # Discretize score difference into bins for Markov states
+    d_bin = case_when(
+      d_pre <= -5 ~ "-5 or less",
+      d_pre >= 5  ~ "5 or more",
+      TRUE        ~ as.character(d_pre)
+    ),
+    #combine with rally stage (early vs late)
+    state = paste(d_bin, rally_importance, sep = "_")
+  )
+```
+
+2. Build Transition Table
+```{r}
+transitions <- data_for_mc %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(next_state = lead(state)) %>%
+  filter(!is.na(next_state)) %>%
+  ungroup()
+
+# Count transitions for probability estimation
+transition_matrix <- transitions %>%
+  count(state, next_state) %>%
+  group_by(state) %>%
+  mutate(prob = n / sum(n)) %>%
+  ungroup()
+
+head(transition_matrix)
+```
+
+3. Absorbing States for set/match Outcomes
+```{r}
+data_for_mc <- data_for_mc %>%
+  mutate(
+    absorbing_set_state = if_else(won_set, "SetWon", "SetLost"),
+    absorbing_match_state = if_else(won_match_rally, "MatchWon", "MatchLost")
+  )
+```
+
+7. Markov Chain Model Implementation
+```{r}
+simulate_match <- function(transitions, start_state, n_rallies = 50) {
+  states <- start_state
+  for(i in 1:n_rallies) {
+    current_state <- tail(states, 1)
+    next_probs <- transitions %>% filter(state == current_state)
+    if(nrow(next_probs) == 0) break
+    next_state <- sample(next_probs$next_state, 1, prob = next_probs$prob)
+    states <- c(states, next_state)
+    if(next_state %in% c("SetWon", "SetLost")) break
+  }
+  return(states)
+}
+```
+
+
+
+
+
 
 
 #Cluster Analysis 

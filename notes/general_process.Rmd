@@ -8,38 +8,21 @@ date: "2025-10-17"
 Research Questions 
 ~Are there high-leverage scores?
 ~Are there ways of grouping scores together into discrete categories by their win probabilities?
-~How do win probabilities differ between non-deciding sets and deciding sets?
-~Bonus: the data set contains actual time-outs called. How well are coaches utilizing their timeouts? + substitutions 
--BIG QUESTION: How do win probabilities change as we go through different scores and through different sets?
+~How do win probabilities differ between non-deciding sets and deciding sets? 
+-BIG QUESTION: How do win probabilities change as we go through different scores and through different sets? (+ overall match)
 GOAL: a comprehensive visual of the change in win probability, the new current win probability 
 
 
-## TO DO
--I THINK WE SHOULD BE CONCISE IN NAMING VARIABLES something_point, something_rally: should choose one to be consistent 
--are we going to do anything w/ deciding, undecided sets 
+##Data Cleaning 
+Points_final: 27580, 30 variables 
+variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
--27580 obs -> 23916 obs. to get zero NAs, to use for modeling 
+Points: 23365 entries , 30 variables (NO NAs)
+variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
-
-#Data Cleaning 
-What is our final dataset??
-
--volleyball_points_dataset, points_final, points
-
-Volleyball_points_dataset:  27,580 entries, 16 total columns
-variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set
-
-Points_final :  27,580 entries, 18 total columns
-variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set, touchs_in_rally, timeout_after_point
-
-NEW POINTS_FINAL : same 27,580 entries, but NOW 20 variables (adding 2 more, may want to explore aswell)
-Added Variables: substitution_after_point, won_match_rally
-
-FINAL DATASET??
-points 23916 observations 20 variables, has zero NAs, option
-
--should add deciding/non-decding sets as a variable !!
-
+*Different Dataset Uses*
+Use the clean (no NAs) dataset (points) for model fitting, validation, and markov property testing (assumptions).
+Use the full dataset (points_final) for descriptive summaries, exploratory visuals, and robustness checks.
 
 ##Exploratory Analysis 
 General Stats:
@@ -86,7 +69,21 @@ CU wins ~58.75% of points when receiving the serve.
     Embed set-level $W$ in a best-of-five framework, tracking sets won until a team reaches three.
 
 More Markov.....
--tranistion prob -> absrobing probs -> validation checks
+-transition prob -> absorbing prob -> validation checks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ##Model Building Ideas to add to Logstic Regression
 -Include more predictors
