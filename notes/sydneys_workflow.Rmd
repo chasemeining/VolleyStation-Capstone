@@ -11,6 +11,7 @@ knitr::opts_chunk$set(warning = FALSE)
 knitr::opts_chunk$set(out.width = "60%",fig.align='center')
 ```
 
+
 ## Load Libraries 
 ```{r}
 # install.packages("here")   # only once allows us to all call from same space 
@@ -96,7 +97,6 @@ dirty_conference_matches_raw2 <- dirty_conference_matches_raw1 %>%
 ```
 
 ##MAIN DATA CLEANING 
-#add encoding set type: non-deciding (to 25) vs. deciding (to 15) + match state: which set number (1–5), sets won/lost so far.
 ```{r}
 #data inflow + outflow
 #in_path  <- "all_matches"
@@ -154,33 +154,8 @@ to_logical_vec <- function(x) {
 
 “Between points” events like timeouts are often recorded right after a point and before the next serve. We’ll roll them up with the rally that just ended (i.e., the point that triggered them).
 
-```{r, eval = FALSE}
-#collapse touches into rally-level dataset
-points_core <- touches_flagged %>%
-  group_by(match_id, set_number, rally_id) %>%
-  summarise(
-    home_score_end        = last(home_team_score),
-    away_score_end        = last(visiting_team_score),
-    serving_team          = first(serving_team),          
-    touches_in_rally      = n(),
-    team_rotation         = suppressWarnings(as.integer(last(team_rotation))),
-    opp_rotation          = suppressWarnings(as.integer(last(opp_rotation))),
-    score_diff_raw        = suppressWarnings(as.integer(last(score_diff))),
-    timeout_after_point   = any(to_logical_vec(timeout), na.rm = TRUE),
-    substitution_after_point = any(to_logical_vec(substitution), na.rm = TRUE),
-    home_team             = last(home_team),
-    visiting_team         = last(visiting_team),
-    won_set               = last(won_set),
-    date                  = last(date),
-    season                = last(season),
-    conference            = last(conference),
-    .groups = "drop"
-  ) %>%
-  arrange(match_id, set_number, rally_id)
-```
-
 ```{r}
-#SAME AS CODE 153-on  but with added variables
+#SLIGHT CHANGE// added variables
 #collapse touches into rally-level dataset
 points_core <- touches_flagged %>%
   group_by(match_id, set_number, rally_id) %>%
@@ -244,6 +219,62 @@ points_cu <- points_w_winner %>%
 ```
 
 By aligning columns to CU, we can analyze run lengths, in-rally momentum, and timeout efficacy without worrying about home/away flipping your signs.
+**ADD NEW
+```{r}
+#pre-rally state variables (for transitions)
+points_cu <- points_cu %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(
+    cu_score_pre  = lag(cu_score_end, default = 0),
+    opp_score_pre = lag(opp_score_end, default = 0),
+    d_pre         = cu_score_pre - opp_score_pre
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#set/match + deciding vs nondeciding set 
+points_cu <- points_cu %>%
+  group_by(match_id) %>%
+  mutate(
+    total_sets = max(set_number, na.rm = TRUE),
+    deciding_set = (set_number == total_sets),
+    rally_in_match = row_number(),
+    rally_prop_in_match = rally_in_match / n()
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#high leverage points 
+points_cu <- points_cu %>%
+  mutate(
+    rally_importance = case_when(
+      cu_score_end >= 20 | opp_score_end >= 20 ~ "late_set",
+      TRUE ~ "early_mid_set"
+    ),
+    # Flag rallies where the score difference is small (≤ 2 points)
+    #“close”//high-pressure moments
+    close_score = abs(cu_score_diff_end) <= 2
+  )
+```
+
+*may not use below but good to have.
+```{r}
+#momentum/clustering variables (detect run-length effects)
+points_cu <- points_cu %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(
+    prev_win = lag(cu_point_won),
+    # Assign a unique run ID whenever the rally result switches (win → loss)
+    run_id = cumsum(cu_point_won != lag(cu_point_won, default = cu_point_won[1])),
+    #Count how many rallies are in each consecutive run
+    run_length = ave(seq_along(run_id), run_id, FUN = length)
+  ) %>%
+  ungroup()
+```
 
 ```{r}
 #final set-level scores 
@@ -256,38 +287,21 @@ set_scores <- touches_flagged %>%
   )
 ```
 
-```{r, eval = FALSE}
-#combination of rally-level + set-level 
-points_final <- points_cu %>%
-  left_join(set_scores, by = c("match_id", "set_number")) %>%
-  select(
-    match_id, date, season, conference,
-    home_team, visiting_team, set_number, rally_id,
-    cu_serving,
-    cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
-    final_home_set_score, final_away_set_score,
-    won_set,
-   touches_in_rally,   #maybe leave out 
-    timeout_after_point  #maybe leave out 
-  )
-```
-
 ```{r}
-#SAME AS 255-on , but DIFFERENT BY JUST ADDING FEW MORE VARIABLES 
+#DIFFERENT BY JUST ADDING FEW MORE VARIABLES 
 points_final <- points_cu %>%
   left_join(set_scores, by = c("match_id", "set_number")) %>%
   select(
     match_id, date, season, conference,
     home_team, visiting_team, set_number, rally_id,
     cu_serving,
+    cu_score_pre, opp_score_pre, d_pre,   # NEW
     cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
+    deciding_set, rally_importance, close_score, rally_in_match, rally_prop_in_match, run_length, prev_win, # NEW CONTEXT
     final_home_set_score, final_away_set_score,
     won_set,
-    touches_in_rally,
-    timeout_after_point,
-    substitution_after_point,    # NEW
-    #home_team_won_rally,         # NEW, same as winning point (same as cu_point_won, except by home_team)
-    won_match_rally              # NEW, whether the home team eventually won the match that the rally belongs to
+    touches_in_rally, timeout_after_point, substitution_after_point,
+    won_match_rally
   )
 ```
 
@@ -295,7 +309,6 @@ Final set scores provide outcome context for every rally (like late-set pressure
 ```{r}
 #output dataset
 write_csv(points_final, out_path)
-head(points_final, 10)
 
 points <- points_final %>%
   na.omit()
@@ -308,16 +321,13 @@ readr::write_csv(points_final, "points.csv")
 ```
 
 #describe the data structure, dimensionality, variable types, and completeness. 
-Points_final :  27,580 entries, 18 total columns
-variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set, touchs_in_rally, timeout_after_point
+Points_final :  27,580 entries, 20 total columns
+variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set, touchs_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
-NEW POINTS_FINAL : same 27,580 entries, but NOW 20 variables (adding 2 more, may want to explore aswell)
-Added Variables: substitution_after_point, won_match_rally
+NEW POINTS dataset: same 23916 entries, 20 variables (just NO NAs)
 
 Volleyball_points_dataset:  27,580 entries, 16 total columns
 variables: match_id, date season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, final_home_set_score, final_away_set_score, won_set
-
-## I THINK WE SHOULD BE CONCISE IN NAMING VARIABLES someting_point , something_rally : should choose one to be consisent 
 
 ## Exploratory Analysis
 ```{r}
@@ -361,7 +371,7 @@ set_scores_cu %>%
   head(10) %>%
   knitr::kable()
 ```
-Distribution of points at a sets end is much more concise for CU decding sets versus non-decding sets.
+Non-deciding sets have a greater number of sets with a) greater distribution of points at the sets end b) greater count of sets at a higher (more likely a win) # of points.
 
 ```{r}
 #Basic summary stats
@@ -408,7 +418,6 @@ points_final %>%
             to_per_rally = timeouts / rallies) %>%
   knitr::kable()
 ```
-
 
 ```{r}
 #Distribution of substitutions per rally
@@ -826,6 +835,98 @@ ggplot(calib, aes(mean_pred, mean_obs, size = n)) +
 After randomly splitting rallies into training (80%) and testing (20%) sets, the model achieved an out-of-sample Brier score of 0.24, indicating modest but consistent predictive accuracy.
 This value is only slightly better than the 0.25 baseline expected for random guessing, which aligns with the limited information available in rally-level predictors (score differential and serving status).
 The model remains well-calibrated and provides a realistic foundation for constructing transition probabilities in our Markov chain win-probability framework.
+
+
+##ANOTHER ATTEMPT
+##MARKOV MODELING PROCESS (SYDNEY)
+```{r}
+data_for_mc <- points
+```
+
+```{r}
+#define rally importance + closeness
+data_for_mc <- data_for_mc %>%
+  mutate(
+    rally_importance = case_when(
+      cu_score_end >= 20 | opp_score_end >= 20 ~ "late_set",
+      TRUE ~ "early_mid_set"
+    ),
+    close_score = abs(cu_score_diff_end) <= 2
+  )
+
+#compute pre-rally score difference 
+data_for_mc <- data_for_mc %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(
+    d_pre = lag(cu_score_diff_end, default = 0)  # score difference before rally
+  ) %>%
+  ungroup()
+```
+
+1. Define Markov States for the Markov Chain
+```{r}
+data_for_mc <- data_for_mc %>%
+  mutate(
+    # Discretize score difference into bins for Markov states
+    d_bin = case_when(
+      d_pre <= -5 ~ "-5 or less",
+      d_pre >= 5  ~ "5 or more",
+      TRUE        ~ as.character(d_pre)
+    ),
+    #combine with rally stage (early vs late)
+    state = paste(d_bin, rally_importance, sep = "_")
+  )
+```
+
+2. Build Transition Table
+```{r}
+transitions <- data_for_mc %>%
+  group_by(match_id, set_number) %>%
+  arrange(rally_id) %>%
+  mutate(next_state = lead(state)) %>%
+  filter(!is.na(next_state)) %>%
+  ungroup()
+
+# Count transitions for probability estimation
+transition_matrix <- transitions %>%
+  count(state, next_state) %>%
+  group_by(state) %>%
+  mutate(prob = n / sum(n)) %>%
+  ungroup()
+
+head(transition_matrix)
+```
+
+3. Absorbing States for set/match Outcomes
+```{r}
+data_for_mc <- data_for_mc %>%
+  mutate(
+    absorbing_set_state = if_else(won_set, "SetWon", "SetLost"),
+    absorbing_match_state = if_else(won_match_rally, "MatchWon", "MatchLost")
+  )
+```
+
+7. Markov Chain Model Implementation
+```{r}
+simulate_match <- function(transitions, start_state, n_rallies = 50) {
+  states <- start_state
+  for(i in 1:n_rallies) {
+    current_state <- tail(states, 1)
+    next_probs <- transitions %>% filter(state == current_state)
+    if(nrow(next_probs) == 0) break
+    next_state <- sample(next_probs$next_state, 1, prob = next_probs$prob)
+    states <- c(states, next_state)
+    if(next_state %in% c("SetWon", "SetLost")) break
+  }
+  return(states)
+}
+```
+
+
+
+
+
 
 
 #Cluster Analysis 
