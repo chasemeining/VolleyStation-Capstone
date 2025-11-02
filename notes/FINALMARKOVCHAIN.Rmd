@@ -319,3 +319,27 @@ dplyr::glimpse(state_df)
 
 ```
 
+```{r}
+# Markov model using data
+make_state_df <- function(max_score = 30L) {
+  expand.grid(
+    cu_points  = 0:max_score,
+    opp_points = 0:max_score,
+    cu_serving = c(0L, 1L)   
+  ) %>%
+    as_tibble() %>%
+    mutate(
+      cu_serve_label = if_else(cu_serving == 1L, "CU serve", "Opp serve"),
+      win_probability = pmap_dbl(
+        list(cu_points, opp_points, cu_serving),
+        ~ get_set_win_prob(..1, ..2, ..3)
+      )
+    )
+}
+
+state_df <- make_state_df(30L)
+
+dplyr::glimpse(state_df)
+```
+
+
