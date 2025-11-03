@@ -568,6 +568,7 @@ pred_table <- diff_grid %>%
 print(pred_table)
 ```
 
+
 ```{r}
 m_null <- glm(y ~ 1, data = pbp2, family = binomial())
 anova(m_null, m_point, test = "Chisq")
