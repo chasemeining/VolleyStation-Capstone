@@ -160,7 +160,6 @@ points_cu <- points_w_winner %>%
 ```
 By aligning columns to CU, we can analyze run lengths, in-rally momentum, and timeout efficacy without worrying about home/away flipping your signs.
 
-**NEW SECTIONS
 ```{r}
 #pre-rally state variables (for transitions)
 points_cu <- points_cu %>%
@@ -175,7 +174,7 @@ points_cu <- points_cu %>%
 ```
 
 ```{r}
-#set/match + deciding vs nondeciding set 
+#set/match + deciding vs non deciding set 
 points_cu <- points_cu %>%
   group_by(match_id) %>%
   mutate(
@@ -215,7 +214,6 @@ points_cu <- points_cu %>%
   ) %>%
   ungroup()
 ```
-** NEW SECTIONS DONE.
 
 ```{r}
 #final set-level scores 
@@ -237,7 +235,7 @@ points_final <- points_cu %>%
     cu_serving,
     cu_score_pre, opp_score_pre, d_pre,   # NEW
     cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won,
-    deciding_set, rally_importance, close_score, rally_in_match, rally_prop_in_match, run_length, prev_win, # NEW CONTEXT
+    deciding_set, rally_importance, close_score, rally_in_match, rally_prop_in_match, run_length, prev_win, 
     final_home_set_score, final_away_set_score,
     won_set,
     touches_in_rally, timeout_after_point, substitution_after_point,
@@ -257,11 +255,11 @@ points <- points_final %>%
 ```{r}
 #export to github
 readr::write_csv(points_final, "points_final.csv")
-readr::write_csv(points_final, "points.csv")
+#readr::write_csv(points_final, "points.csv")
 ```
 
 Points_final: 27580, 30 variables 
-variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
+variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_id, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rally_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
 Points: 23365 entries , 30 variables (NO NAs)
 variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
@@ -327,25 +325,6 @@ CU wins ~42.04% of points when serving.
 CU wins ~58.75% of points when receiving the serve.
 
 *Exploration Plots*
-```{r}
-# distribution of CU points at set end, by deciding vs non-deciding sets
-points_final %>%
-  group_by(match_id, set_number) %>%
-  slice_tail(n = 1) %>%  # last rally of each set
-  ungroup() %>%
-  ggplot(aes(x = cu_score_end)) +
-  geom_histogram(binwidth = 1, fill = "steelblue", color = "black", alpha = 0.7) +
-  facet_wrap(~ deciding_set, 
-             labeller = labeller(deciding_set = c(`FALSE` = "Non-Deciding Set", `TRUE` = "Deciding Set"))) +
-  labs(
-    title = "Distribution of CU Points at Set End",
-    x = "CU Points at Set End",
-    y = "Count of Sets"
-  ) +
-  theme_minimal()
-```
-Non-deciding sets have a greater number of sets with a) greater distribution of points at the sets end b) greater count of sets at a higher (more likely a win) # of points.
-
 ```{r,FALSE}
 #table of common final scores
 set_scores_cu %>%
@@ -417,38 +396,6 @@ points_final %>%
 Tests whether winning or losing streaks affect rally outcomes.
 
 ```{r}
-#Rally Importance + Closeness
-# Win rate by rally importance and closeness
-points_final %>%
-  group_by(rally_importance, close_score) %>%
-  summarise(win_prob = mean(cu_point_won, na.rm = TRUE)) %>%
-  ggplot(aes(x = rally_importance, y = win_prob, fill = close_score)) +
-  geom_col(position = "dodge") +
-  labs(title = "Win Probability by Rally Importance and Score Closeness",
-       x = "Rally Stage", y = "Win Probability")
-```
-Highlights whether CU performs differently under pressure (close, late rallies). No apperance of a difference. 
-
-```{r}
-# Win probability by set type 
-points_final %>%
-  group_by(match_id, set_number, deciding_set) %>%   # aggregate at set level
-  summarise(cu_won_set = max(won_set, na.rm = TRUE), .groups = "drop") %>%  # won_set is binary per set
-  group_by(deciding_set) %>%
-  summarise(win_prob = mean(cu_won_set), .groups = "drop") %>%  # average across sets
-  ggplot(aes(x = deciding_set, y = win_prob, fill = deciding_set)) +
-  geom_col() +
-  scale_x_discrete(labels = c("Non-Deciding", "Deciding")) +
-  labs(
-    title = "CU Set Win Probability by Set Type",
-    x = "Set Type",
-    y = "Win Probability"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none")
-```
-
-```{r}
 #seasonal patterns 
 points_final %>%
   group_by(season) %>%
@@ -460,30 +407,17 @@ points_final %>%
        x = "Season", y = "Win Rate")
 ```
 
-```{r}
-#HEATMAP: win probabilities 
-points_final %>%
-  count(cu_score_end, opp_score_end, wt = cu_point_won, name = "wins") %>%
-  left_join(count(points_final, cu_score_end, opp_score_end, name = "total"),
-            by = c("cu_score_end", "opp_score_end")) %>%
-  mutate(win_prob = wins / total) %>%
-  ggplot(aes(x = opp_score_end, y = cu_score_end, fill = win_prob)) +
-  geom_tile() +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Heatmap of CU Rally Win Probability by Score State",
-       x = "Opponent Score", y = "CU Score", fill = "Win Prob")
-```
 
 pbp dataset 
 variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
 pbp2 dataset 
--adds y and cu_serve
+-adds y and cu_serve to variables 
 
 ##Markov Modeling Outcomes w/ Logistic Regression Model
-*Use points dataset for modeling*.
+*Use points_final dataset for modeling*.
 ```{r}
-pbp <- points
+pbp <- points_final
 
 pbp2 <- pbp %>%
   mutate(
@@ -508,7 +442,7 @@ coef(m_point)
 #forms transition kernel of the markov chain 
 ```
 
-##OTHER LOGSTIC MODEL 
+##OTHER LOGSTIC MODEL w/ addition of m_point2
 ```{r,FALSE}
 m_point2 <- glm(
   y ~ 
@@ -633,6 +567,10 @@ key_states <- tribble(
 knitr::kable(key_states, digits = 4, align = c("l","r","r","c","r"))
 
 key_states
+
+#export to github
+table_md <- kable(key_states, format = "markdown")
+writeLines(table_md, "key_states_logstic_table.md")
 ```
 
 ```{r}
@@ -653,6 +591,10 @@ deuce_grid <- expand.grid(
 knitr::kable(deuce_grid, digits = 4)
 
 deuce_grid
+
+#export to github
+table_md <- kable(deuce_grid, format = "markdown")
+writeLines(table_md, "deuce_grid_logstic_table.md")
 ```
 
 ```{r}
@@ -708,7 +650,7 @@ build_grid_safe <- function(range_limit = 30L) {
     )
 }
 
-grid30 <- build_grid_safe(30L)
+grid30 <- build_grid_safe(30L)  #1922 by 5 vars.
 ```
 
 ```{r}
@@ -748,7 +690,7 @@ ggplot(band, aes(x = opp, y = cu)) +
   scale_fill_viridis_c(name = "CU set win\nprobability", limits = c(0,1)) +
   coord_equal() +
   labs(x = "Opponent points", y = "CU points",
-       title = "Deuce band (22–30): set win probability by server") +
+       title = "Deuce band (22–30): set win probability by Servering Team") +
   theme_minimal(base_size = 12)
 ```
 
@@ -772,6 +714,7 @@ make_state_df <- function(max_score = 30L) {
 
 # Generate for 0–30 range
 state_df <- make_state_df(30L)
+write.csv(state_df, "state_df.csv", row.names = FALSE)
 
 # Preview
 dplyr::glimpse(state_df)
@@ -779,10 +722,10 @@ dplyr::glimpse(state_df)
 
 
 ##Markov Modeling Outcomes w/ GAM Model
-*Use points dataset for modeling*.
+*Use points_final dataset for modeling*.
 ```{r}
 #predictors
-points_tomod <- points %>%
+points_tomod <- points_final %>%
   mutate(
     y = as.integer(cu_point_won),                  # outcome: CU wins rally (0/1)
     #d_pre = cu_score_pre - opp_score_pre,         # score differential pre-rally
@@ -910,7 +853,7 @@ v_state <- function(cu, opp, cu_serve) {
 
 ```{r}
 # --- Key states table ---
-key_states <- tribble(
+key_states1 <- tribble(
   ~state,                         ~cu, ~opp, ~srv,
   "Start (0-0, CU serve)",         0L,  0L,   1L,
   "Start (0-0, OPP serve)",        0L,  0L,   0L,
@@ -925,14 +868,17 @@ key_states <- tribble(
   ) %>%
   select(state, cu_points = cu, opp_points = opp, cu_serve, `CU set win probability`)
 
-knitr::kable(key_states, digits = 4, align = c("l","r","r","c","r"))
+knitr::kable(key_states1, digits = 4, align = c("l","r","r","c","r"))
 
-key_states
+key_states1
+
+table_md1 <- kable(key_states1, format = "markdown")
+writeLines(table_md1, "key_states_GAM_table.md")
 ```
 
 ```{r}
 # --- Deuce-region grid (22..25) for both serve statuses ---
-deuce_grid <- expand.grid(
+deuce_grid1 <- expand.grid(
   cu  = 22:25,
   opp = 22:25,
   srv = c(1L, 0L)
@@ -945,9 +891,12 @@ deuce_grid <- expand.grid(
   arrange(cu, opp, desc(cu_serve)) %>%
   select(cu_points = cu, opp_points = opp, cu_serve, `CU set win probability`)
 
-knitr::kable(deuce_grid, digits = 4)
+knitr::kable(deuce_grid1, digits = 4)
 
-deuce_grid
+deuce_grid1
+
+table_md1 <- kable(deuce_grid1, format = "markdown")
+writeLines(table_md1, "deuce_grid_GAM_table.md")
 ```
 
 ```{r}
@@ -1003,7 +952,7 @@ build_grid_safe <- function(range_limit = 30L) {
     )
 }
 
-grid30 <- build_grid_safe(30L)
+grid30_GAM <- build_grid_safe(30L)
 ```
 
 ```{r}
@@ -1024,7 +973,7 @@ band <- build_deuce_band(22L, 30L)
 
 ```{r}
 # 1) Heatmap by serving status
-ggplot(grid30, aes(x = opp, y = cu, fill = prob)) +
+ggplot(grid30_GAM, aes(x = opp, y = cu, fill = prob)) +
   geom_tile() +
   facet_wrap(~ cu_serve) +
   scale_fill_viridis_c(name = "CU set win\nprobability", limits = c(0,1)) +
@@ -1065,22 +1014,17 @@ make_state_df <- function(max_score = 30L) {
 }
 
 # Generate for 0–30 range
-state_df <- make_state_df(30L)
+state_df_GAM <- make_state_df(30L)
 
 # Preview
-dplyr::glimpse(state_df)
+dplyr::glimpse(state_df_GAM)
 ```
-
-
-
-
-
 
 
 ## RESEARCH QUESTIONS
 #Q1: Are there high-leverage scores?
 ```{r}
-points2 <- points %>%
+points2 <- points_final %>%
   rowwise() %>%  # process row by row
   mutate(
     win_prob_before = get_set_win_prob(cu_score_pre, opp_score_pre, as.integer(cu_serving)),
@@ -1109,41 +1053,147 @@ ggplot(points2, aes(x = cu_score_end, y = opp_score_end, fill = leverage)) +
 
 #Q2: Are there ways of grouping scores together into discrete categories by their win probabilities?
 ```{r}
-grid30 %>%
-  mutate(win_group = cut(prob, breaks = c(0, 0.25, 0.5, 0.75, 1),
-                         labels = c("Low", "Medium", "High", "Very High"))) %>%
-  ggplot(aes(x = opp, y = cu, fill = win_group)) +
-  geom_tile() +
-  facet_wrap(~ cu_serve) +
-  scale_fill_manual(values = c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF")) +
-  labs(title = "Score Regions Grouped by CU Set Win Probability",
-       x = "Opponent Score", y = "CU Score", fill = "Win Group")
-```
-```{r}
 #SAME GRAPHIC AS ABOVE WITHOUT NAs
-grid30 %>%
-  filter(!is.na(prob)) %>%   # remove any NA values
+grid30_GAM %>%
+  filter(!is.na(prob)) %>%   # remove NA values
   mutate(
-    prob = pmin(pmax(prob, 0), 1),  # clamp to [0,1]
+    prob = pmin(pmax(prob, 0), 1),  # clamp probabilities between 0 and 1
     win_group = cut(
       prob, 
       breaks = c(0, 0.25, 0.5, 0.75, 1),
-      labels = c("Low", "Medium", "High", "Very High"),
+      labels = c("Low (0–25%)", "Medium (25–50%)", "High (50–75%)", "Very High (75–100%)"),
       include.lowest = TRUE
     )
   ) %>%
   ggplot(aes(x = opp, y = cu, fill = win_group)) +
   geom_tile() +
-  facet_wrap(~ cu_serve) +
-  scale_fill_manual(values = c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF")) +
+  #facet_wrap(~ cu_serve, labeller = labeller(cu_serve = c("0" = "Opponent Serve", "1" = "CU Serve"))) +
+  scale_fill_manual(
+    values = c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"),
+    name = "CU Win Probability"
+  ) +
   labs(
-    title = "Score Regions Grouped by CU Set Win Probability",
-    x = "Opponent Score", y = "CU Score", fill = "Win Group"
+    title = "CU Set Win Probability by Score State",
+    subtitle = "Heatmap of Win Likelihoods Grouped Into Four Probability Tiers",
+    x = "Opponent Score",
+    y = "CU Score"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray30")
+  )
+```
+Description:
+This heatmap visualizes the CU women’s volleyball team’s probability of winning a set based on the current score.
+Each tile represents a possible score state (CU score, Opponent score), colored by the estimated win probability group: Low (0–25%), Medium (25–50%), High (50–75%), and Very High (75–100%).
+The clear diagonal pattern shows how CU’s chances increase as their score surpasses the opponent’s, with noticeably higher probabilities when CU is serving at key score margins.
+
+```{r}
+grid30_GAM %>%
+  filter(!is.na(prob)) %>%
+  mutate(
+    prob_group = ntile(prob, 4),  # splits into 4 equal-frequency groups
+    win_group = factor(prob_group, labels = c("Lowest", "Low-Medium", "High-Medium", "Highest"))
+  ) %>%
+  ggplot(aes(x = opp, y = cu, fill = win_group)) +
+  geom_tile() +
+  #facet_wrap(~ cu_serve, labeller = labeller(cu_serve = c("0" = "Opponent Serve", "1" = "CU Serve"))) +
+  scale_fill_manual(
+    values = c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"),
+    name = "CU Win Probability"
+  ) +
+  labs(
+    title = "CU Set Win Probability by Score State",
+    subtitle = "Heatmap of Win Likelihoods Grouped Into Four Probability Tiers",
+    x = "Opponent Score",
+    y = "CU Score"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray30")
+  )
+```
+Quantile-based grouping: split the probabilities based on their distribution in the data. This ensures roughly equal numbers of tiles in each group.
+
+```{r}
+#ADDS the discrete grouping to the dataset
+grid30_GAM <- grid30_GAM %>%
+  filter(!is.na(prob)) %>%        # remove NAs
+  mutate(
+    prob_group = ntile(prob, 4),  # split into 4 equal-frequency groups
+    win_group = factor(
+      prob_group, 
+      labels = c("Lowest", "Low-Medium", "High-Medium", "Highest")
+    )
   )
 ```
 
 
 #Q3: How do win probabilities differ between non-deciding sets and deciding sets?
+1st deciding vs non-deciding relation to actual wins from data.
+```{r}
+# distribution of CU points at set end, by deciding vs non-deciding sets
+points_final %>%
+  group_by(match_id, set_number) %>%
+  slice_tail(n = 1) %>%  # last rally of each set
+  ungroup() %>%
+  ggplot(aes(x = cu_score_end)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black", alpha = 0.7) +
+  facet_wrap(~ deciding_set, 
+             labeller = labeller(deciding_set = c(`FALSE` = "Non-Deciding Set", `TRUE` = "Deciding Set"))) +
+  labs(
+    title = "Distribution of CU Points at Set End",
+    x = "CU Points at Set End",
+    y = "Count of Sets"
+  ) +
+  theme_minimal()
+```
+Non-deciding sets have a greater number of sets with a) greater distribution of points at the sets end b) greater count of sets at a higher (more likely a win) # of points.
+
+```{r}
+#before 
+t.test(cu_score_end ~ deciding_set, data = points_final)
+
+# Equalize sample sizes by random sampling
+points_balanced <- points_final %>%
+  group_by(deciding_set) %>%
+  sample_n(size = min(table(points_final$deciding_set))) %>%
+  ungroup()
+
+# Now run the t-test on balanced data
+t.test(cu_score_end ~ deciding_set, data = points_balanced)
+```
+H₀: mean(CU points | non-deciding) = mean(CU points | deciding)
+H₁: they differ.
+
+Even after balancing for the fact that there are usually more non-deciding sets, CU tends to score significantly fewer points in deciding sets compared to non-deciding ones.
+
+```{r}
+# Compute group means first
+means_df <- points_balanced %>%
+  group_by(deciding_set) %>%
+  summarize(mean_points = mean(cu_score_end, na.rm = TRUE))
+
+# Plot density + mean lines
+ggplot(points_balanced, aes(x = cu_score_end, fill = deciding_set)) +
+  geom_density(alpha = 0.5, adjust = 1.2) +
+  geom_vline(data = means_df, aes(xintercept = mean_points, color = deciding_set),
+             linetype = "dashed", size = 1) +
+  scale_fill_manual(values = c("steelblue", "tomato"),
+                    labels = c("Non-Deciding Set", "Deciding Set")) +
+  scale_color_manual(values = c("steelblue4", "tomato4"), guide = "none") +
+  labs(
+    title = "Distribution of CU Points at Set End (Balanced by Set Type)",
+    subtitle = "Dashed lines indicate mean points per set type",
+    x = "CU Points at Set End",
+    y = "Density",
+    fill = "Set Type"
+  ) +
+  theme_minimal(base_size = 14)
+```
+Now using modeling and our data with logistic regression.
 ```{r}
 #might change 
 m_deciding <- glm(y ~ d_pre + I(d_pre^2) + cu_serv,
@@ -1155,36 +1205,26 @@ broom::tidy(m_deciding)
 broom::tidy(m_nondeciding)
 ```
 
-
-
-```{r}
-library(purrr)
-points_final2 <- points_final %>%
-  mutate(
-    prob = pmap_dbl(
-      list(cu_score_end, opp_score_end, as.integer(cu_serving)),
-      get_set_win_prob
-    )
-  )
-
-# Then plot
-ggplot(points_final2, aes(x = rally_prop_in_match, y = prob, color = as.factor(set_number))) +
-  geom_line(alpha = 0.7) +
-  labs(
-    title = "Evolution of CU Win Probability Across Sets",
-    x = "Rally Progression (0–1 within match)", 
-    y = "Win Probability", 
-    color = "Set #"
-  ) +
-  theme_minimal()
-```
-
-
 ##Q4 BIG QUESTION: How do win probabilities change as we go through different scores and through different sets? (+ overall match)
 
 First need diagnostic tests to know our model meets assumptions.
 Then model validation/testing of Markov chain model.
 Then final plotting + graphics + interpretation of results.
+```{r}
+#HEATMAP: win probabilities OF EMPIRICAL DATA
+points_final %>%
+  count(cu_score_end, opp_score_end, wt = cu_point_won, name = "wins") %>%
+  left_join(count(points_final, cu_score_end, opp_score_end, name = "total"),
+            by = c("cu_score_end", "opp_score_end")) %>%
+  mutate(win_prob = wins / total) %>%
+  ggplot(aes(x = opp_score_end, y = cu_score_end, fill = win_prob)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Heatmap of CU Rally Win Probability by Score State",
+       x = "Opponent Score", y = "CU Score", fill = "Win Probabilities")
+```
+
+OTHER TWO FOR LOGISTIC + GAM are with there respective code sections.
 
 
 
@@ -1194,7 +1234,7 @@ A. Logistic Regression (Rally-Level Markov Model) Diagnostics
 ```{r}
 #Residual Analysis
 # Pearson residuals
-resid_pearson <- residuals(m_point2, type = "pearson")
+resid_pearson <- residuals(m_point, type = "pearson")
 hist(resid_pearson, breaks = 50, main = "Histogram of Pearson Residuals", xlab = "Residual")
 
 plot(fitted(m_point), residuals(m_point2, type = "pearson"))
@@ -1358,3 +1398,116 @@ pbp %>%
   labs(title = "Mean Residuals Across Score States", x = "Opp Score Pre-Rally", y = "CU Score Pre-Rally")
 ```
 
+
+# ACCURACY // VALIDATION
+
+#check GAM fit 
+```{r}
+library(Metrics)
+
+# Predicted probabilities from GAM
+points_tomod$pred_prob <- p_hat(points_tomod$cu_score_pre - points_tomod$opp_score_pre, 
+                                points_tomod$cu_serv)
+
+# Brier Score (mean squared error for probabilities)
+brier_score <- mean((points_tomod$pred_prob - points_tomod$y)^2)
+brier_score
+
+# Log loss
+logloss <- -mean(points_tomod$y*log(points_tomod$pred_prob) + 
+                 (1-points_tomod$y)*log(1-points_tomod$pred_prob))
+logloss
+
+#calibration plot
+points_tomod %>%
+  mutate(prob_bin = cut(pred_prob, breaks = seq(0,1,0.1))) %>%
+  group_by(prob_bin) %>%
+  summarize(obs_rate = mean(y), pred_rate = mean(pred_prob), n = n()) %>%
+  ggplot(aes(x = pred_rate, y = obs_rate)) +
+  geom_point(size = 2) +
+  geom_abline(slope=1, intercept=0, linetype="dashed") +
+  labs(x = "Predicted probability", y = "Observed proportion of CU wins",
+       title = "Calibration of GAM-predicted rally probabilities")
+```
+0.2426 is slightly better than random, which makes sense because individual rallies are noisy and only partially predictable.
+0.6783 indicates moderate predictive ability, again reflecting the inherent randomness in rally-by-rally outcomes.
+
+
+#validate markov chain probabilities 
+```{r}
+#Compare the Markov chain set-win probabilities to actual match outcomes 
+# Compute predicted set win probability at start of each set
+set_preds <- points_final %>%
+  group_by(match_id, set_number) %>%
+  slice_head(n = 1) %>%  # first rally of the set
+  ungroup() %>%
+  mutate(
+    pred_set_prob = pmap_dbl(
+      list(cu_score_pre, opp_score_pre, cu_serving),
+      ~ get_set_win_prob(..1, ..2, ..3)
+    ),
+    set_won = as.integer(won_set)  # use existing variable for actual set outcome
+  )
+
+# Brier score for set outcome
+brier_set <- mean((set_preds$pred_set_prob - set_preds$set_won)^2)
+brier_set
+```
+This is slightly higher than the GAM Brier score, but remember this is for entire sets, not individual rallies.
+
+#Simulate full sets
+```{r}
+simulate_set <- function(V, max_score=25){
+  cu <- 0; opp <- 0; srv <- 1  # start CU serving
+  while(!is_terminal(cu, opp)){
+    p <- get_set_win_prob(cu, opp, srv)
+    win <- rbinom(1, 1, p)
+    if(win){
+      cu <- cu + 1
+      srv <- 1
+    } else {
+      opp <- opp + 1
+      srv <- 0
+    }
+  }
+  return(ifelse(cu > opp, 1, 0))  # 1 if CU wins
+}
+
+# Simulate 10,000 sets
+set.seed(123)
+sim_results <- replicate(10000, simulate_set(V))
+
+mean(sim_results)  # compare to average predicted start-of-set CU win probability
+```
+```{r}
+#new dataframe with only simulated probabilities and key info
+points_sim <- points_final %>%
+  mutate(
+    cu_score_pre = as.integer(cu_score_pre),
+    opp_score_pre = as.integer(opp_score_pre),
+    cu_serving = as.integer(cu_serving),
+    sim_prob = pmap_dbl(
+      list(cu_score_pre, opp_score_pre, cu_serving),
+      ~ get_set_win_prob(..1, ..2, ..3)
+    ),
+    won_set = as.integer(won_set)  # convert TRUE/FALSE to 1/0
+  ) %>%
+  select(match_id, set_number, won_set, sim_prob)
+
+# Check the result
+head(points_sim)
+write.csv(points_sim, "points_sim.csv", row.names = FALSE)
+```
+
+Compare simulated with observed.
+```{r}
+#NOT WORKING RN //IDK 
+points_final1 <- points_final %>%
+  mutate(won_set_bin = as.integer(won_set))
+
+observed_win_rate <- mean(points_final1$won_set_bin)
+predicted_win_rate <- mean(sim_results)
+
+cat("Observed CU win rate:", observed_win_rate, "\n")
+cat("Simulated CU win rate:", predicted_win_rate, "\n")
+```
