@@ -480,7 +480,7 @@ variables: match_id, date, season, conference, home_team, visiting_team, set_num
 pbp2 dataset 
 -adds y and cu_serve
 
-##Markov Modeling Outcomes (Ethans w/ Sydneys new dataset)
+##Markov Modeling Outcomes w/ Logistic Regression Model
 *Use points dataset for modeling*.
 ```{r}
 pbp <- points
@@ -509,7 +509,7 @@ coef(m_point)
 ```
 
 ##NEW MODEL TO IMPLEMENT INTO CODE BELOW 
-```{r}
+```{r,FALSE}
 m_point2 <- glm(
   y ~ 
     d_pre + I(d_pre^2) +
@@ -776,6 +776,324 @@ state_df <- make_state_df(30L)
 # Preview
 dplyr::glimpse(state_df)
 ```
+
+
+##Markov Modeling Outcomes w/ GAM Model
+*Use points dataset for modeling*.
+```{r}
+#predictors
+points_tomod <- points %>%
+  mutate(
+    y = as.integer(cu_point_won),                  # outcome: CU wins rally (0/1)
+    #d_pre = cu_score_pre - opp_score_pre,         # score differential pre-rally
+    cu_serv = as.integer(cu_serving),             # 0/1 serving
+  ) %>%
+  filter(y %in% c(0,1), cu_serv %in% c(0,1))
+```
+
+```{r}
+#GAM model 
+m_point_gam <- gam(
+  y ~ 
+    s(d_pre) +                  # smooth effect of score difference
+    s(run_length) +             # smooth effect of rally length
+    cu_serv +                   # 
+    s(d_pre, by = cu_serv),     #interaction??
+  data = points_tomod,
+  family = binomial(link = "logit")
+)
+summary(m_point_gam)
+```
+
+#diagonsitc checks for GAM 
+```{r}
+summary(m_point_gam)       #significance of smooth terms
+gam.check(m_point_gam)     #check residuals + smoothness
+AUC <- pROC::roc(points_tomod$y, predict(m_point_gam, type="response"))$auc
+```
+
+#implementation of GAM into Markov Chain 
+```{r}
+# --- Probability function p_hat(d_pre, cu_serv) for GAM ---
+CLAMP_DIFF <- 12L
+
+clamp <- function(x, lo, hi) pmax(lo, pmin(hi, x))
+
+p_hat <- (function(model_gam){
+  # Returns a function that takes d_pre and cu_serv and outputs probability
+  function(d_pre, cu_serv){
+    # Clamp d_pre to reasonable range
+    d <- clamp(d_pre, -CLAMP_DIFF, CLAMP_DIFF)
+    # Construct a new data frame to pass to predict()
+    newdata <- data.frame(
+      d_pre = d,
+      run_length = 1,   # optionally set default rally length if unknown
+      cu_serv = as.numeric(cu_serv)
+    )
+    # If your GAM includes s(d_pre, by = cu_serv) interaction, we need to keep cu_serv in newdata
+    pred <- predict(model_gam, newdata = newdata, type = "response")
+    as.numeric(pred)
+  }
+})(m_point_gam)
+```
+
+```{r}
+# --- Absorbing Markov chain via VALUE ITERATION (win by 2, to 25+) ---
+TARGET     <- 25L
+MAX_SCORE  <- 50L   # generous cap to cover long deuce stretches
+SERVERS    <- 0:1   # 0 = opp serve, 1 = CU serve
+
+# Array V[cu+1, opp+1, srv+1] stores CU set win prob from that state
+V <- array(0, dim = c(MAX_SCORE+1, MAX_SCORE+1, 2))
+
+is_terminal <- function(cu, opp) {
+  (cu >= TARGET || opp >= TARGET) && abs(cu - opp) >= 2
+}
+
+# Initialize terminal states
+for (cu in 0:MAX_SCORE) {
+  for (opp in 0:MAX_SCORE) {
+    if (is_terminal(cu, opp)) {
+      val <- if (cu > opp) 1.0 else 0.0
+      V[cu+1, opp+1, 1] <- val
+      V[cu+1, opp+1, 2] <- val
+    }
+  }
+}
+
+step_value <- function(V){
+  Vnew <- V
+  for (cu in 0:MAX_SCORE) {
+    for (opp in 0:MAX_SCORE) {
+      for (srv in SERVERS) {
+        if (is_terminal(cu, opp)) next
+        # CU rally win probability from (cu, opp, srv):
+        p <- p_hat(cu - opp, srv)
+        # Transitions:
+        cu_win_cu   <- min(cu + 1L, MAX_SCORE)
+        cu_win_opp  <- opp
+        cu_win_srv  <- 1L  # CU serves after CU wins rally
+        cu_lose_cu  <- cu
+        cu_lose_opp <- min(opp + 1L, MAX_SCORE)
+        cu_lose_srv <- 0L  # OPP serves after CU loses rally
+        Vnew[cu+1, opp+1, srv+1] <-
+          p * V[cu_win_cu+1,  cu_win_opp+1,  cu_win_srv+1] +
+          (1-p) * V[cu_lose_cu+1, cu_lose_opp+1, cu_lose_srv+1]
+      }
+    }
+  }
+  Vnew
+}
+
+```
+
+```{r}
+# Iterate to convergence
+max_iters <- 400L
+tol <- 1e-10
+for (it in 1:max_iters) {
+  Vnew <- step_value(V)
+  delta <- max(abs(Vnew - V))
+  V <- Vnew
+  if (delta < tol) {
+    message(sprintf("Converged in %d iterations (delta=%.3g)", it, delta))
+    break
+  }
+}
+```
+
+```{r}
+# --- Helper to read value from array ---
+v_state <- function(cu, opp, cu_serve) {
+  V[cu+1, opp+1, cu_serve+1]
+}
+```
+
+```{r}
+# --- Key states table ---
+key_states <- tribble(
+  ~state,                         ~cu, ~opp, ~srv,
+  "Start (0-0, CU serve)",         0L,  0L,   1L,
+  "Start (0-0, OPP serve)",        0L,  0L,   0L,
+  "Late: 24-23, CU serve",        24L, 23L,   1L,
+  "Late: 24-23, OPP serve",       24L, 23L,   0L,
+  "Late: 23-24, CU serve",        23L, 24L,   1L,
+  "Late: 23-24, OPP serve",       23L, 24L,   0L
+) %>%
+  mutate(
+    cu_serve = if_else(srv == 1L, "Yes", "No"),
+    `CU set win probability` = pmap_dbl(list(cu, opp, srv), ~ v_state(..1, ..2, ..3))
+  ) %>%
+  select(state, cu_points = cu, opp_points = opp, cu_serve, `CU set win probability`)
+
+knitr::kable(key_states, digits = 4, align = c("l","r","r","c","r"))
+
+key_states
+```
+
+```{r}
+# --- Deuce-region grid (22..25) for both serve statuses ---
+deuce_grid <- expand.grid(
+  cu  = 22:25,
+  opp = 22:25,
+  srv = c(1L, 0L)
+) %>%
+  as_tibble() %>%
+  mutate(
+    cu_serve = if_else(srv == 1L, "Yes", "No"),
+    `CU set win probability` = pmap_dbl(list(cu, opp, srv), ~ v_state(..1, ..2, ..3))
+  ) %>%
+  arrange(cu, opp, desc(cu_serve)) %>%
+  select(cu_points = cu, opp_points = opp, cu_serve, `CU set win probability`)
+
+knitr::kable(deuce_grid, digits = 4)
+
+deuce_grid
+```
+
+```{r}
+# --- Function: return CU set win probability for any state ---
+get_set_win_prob <- function(cu_points, opp_points, cu_serving) {
+  # cu_points: integer (0–25+)
+  # opp_points: integer (0–25+)
+  # cu_serving: 1 if CU serving, 0 if opponent serving
+  
+  # Clamp inputs to grid boundaries
+  cu <- pmin(pmax(cu_points, 0L), MAX_SCORE)
+  opp <- pmin(pmax(opp_points, 0L), MAX_SCORE)
+  srv <- ifelse(cu_serving %in% c(1, TRUE), 1L, 0L)
+  
+  # Retrieve from the Markov value matrix V
+  prob <- V[cu + 1, opp + 1, srv + 1]
+  return(prob)
+}
+```
+
+```{r}
+# Example 1: Start of set, CU serving
+get_set_win_prob(0, 0, 1)
+# Example 2: Start of set, Opp serving
+get_set_win_prob(0, 0, 0)
+# Example 3: Deuce scenario (24-23, CU serve)
+get_set_win_prob(24, 23, 1)
+# Example 4: Opponent leads 22-24, opponent serving
+get_set_win_prob(22, 24, 0)
+
+get_set_win_prob(15,19,0)
+                 
+get_set_win_prob(15,15,1)
+
+get_set_win_prob(15,15,0)
+```
+
+```{r}
+build_grid_safe <- function(range_limit = 30L) {
+  stopifnot(exists("V"), exists("get_set_win_prob"))
+  expand.grid(
+    cu  = 0:range_limit,
+    opp = 0:range_limit,
+    srv = c(0L, 1L)        # 0 = opp serve, 1 = CU serve
+  ) %>%
+    as_tibble() %>%
+    mutate(
+      cu_serve = if_else(srv == 1L, "CU serve", "Opp serve"),
+      prob = pmap_dbl(
+        list(cu, opp, srv),
+        ~ get_set_win_prob(..1, ..2, ..3)  # one lookup per row
+      )
+    )
+}
+
+grid30 <- build_grid_safe(30L)
+```
+
+```{r}
+build_deuce_band <- function(lo = 22L, hi = 30L) {
+  expand.grid(
+    cu  = lo:hi,
+    opp = lo:hi,
+    srv = c(0L, 1L)
+  ) %>%
+    as_tibble() %>%
+    mutate(
+      cu_serve = if_else(srv == 1L, "CU serve", "Opp serve"),
+      prob = pmap_dbl(list(cu, opp, srv), ~ get_set_win_prob(..1, ..2, ..3))
+    )
+}
+band <- build_deuce_band(22L, 30L)
+```
+
+```{r}
+# 1) Heatmap by serving status
+ggplot(grid30, aes(x = opp, y = cu, fill = prob)) +
+  geom_tile() +
+  facet_wrap(~ cu_serve) +
+  scale_fill_viridis_c(name = "CU set win\nprobability", limits = c(0,1)) +
+  coord_equal() +
+  labs(x = "Opponent points", y = "CU points",
+       title = "Set win probability across score states by server") +
+  theme_minimal(base_size = 12)
+
+# 2) Deuce band with contours
+ggplot(band, aes(x = opp, y = cu)) +
+  geom_tile(aes(fill = prob)) +
+  geom_contour(aes(z = prob), breaks = seq(0.5, 0.9, by = 0.05),
+               color = "white", linewidth = 0.35) +
+  facet_wrap(~ cu_serve) +
+  scale_fill_viridis_c(name = "CU set win\nprobability", limits = c(0,1)) +
+  coord_equal() +
+  labs(x = "Opponent points", y = "CU points",
+       title = "Deuce band (22–30): set win probability by server") +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+# Create a dataframe of all possible score states and serve conditions
+make_state_df <- function(max_score = 30L) {
+  expand.grid(
+    cu_points  = 0:max_score,
+    opp_points = 0:max_score,
+    cu_serving = c(0L, 1L)   # 0 = Opp serve, 1 = CU serve
+  ) %>%
+    as_tibble() %>%
+    mutate(
+      cu_serve_label = if_else(cu_serving == 1L, "CU serve", "Opp serve"),
+      win_probability = pmap_dbl(
+        list(cu_points, opp_points, cu_serving),
+        ~ get_set_win_prob(..1, ..2, ..3)
+      )
+    )
+}
+
+# Generate for 0–30 range
+state_df <- make_state_df(30L)
+
+# Preview
+dplyr::glimpse(state_df)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
