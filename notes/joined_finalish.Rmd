@@ -32,7 +32,7 @@ library(randtests)
 library(purrr)
 library(stringr)
 library(mgcv)      # for GAM
-library(glmmTMB)   # for mixed-effects logistic regression
+#library(glmmTMB)   # for mixed-effects logistic regression
 ```
 
 ## Load Datasets
@@ -1247,10 +1247,42 @@ mean(res_pearson^2)  # should be ~1 if model fits well
 ```
 
 ```{r}
-#Multicollinearity Check
-vif(m_point2)
+#1: Independence of Observations
+# Check for potential clustering (e.g., by match, player, or set)
+table(pbp2$match_id)    # if you have match_id
+table(pbp2$set_number)  # if repeated rallies occur within the same set
 ```
-This is good, close to 1 means no correlation between predictors. 
+
+```{r}
+#2: Multicollinearity Check
+car::vif(m_point)
+```
+This is good, all VIF values (1.071186, 1.013266, 1.057551) close to 1 means little to no multicollinearity concern.
+
+VIF > 5 → potential multicollinearity concern 
+
+```{r}
+# 3: Linearity in Log odds
+library(car)
+#boxTidwell(y ~ d_pre, data = pbp2)
+library(visreg)
+visreg(m_point, "d_pre", scale = "response")
+```
+
+```{r}
+#4: Suffiecent sample size 
+# Number of events (1's)
+n_events <- sum(pbp2$y == 1, na.rm = TRUE)
+
+# Number of predictors (excluding intercept)
+n_predictors <- length(coef(m_point)) - 1
+
+EPV <- n_events / n_predictors
+EPV
+```
+EPV ≥ 10 → model is likely stable
+
+
 
 ```{r}
 #Model specification / goodness-of-fit
