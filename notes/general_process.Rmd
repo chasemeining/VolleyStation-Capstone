@@ -17,22 +17,28 @@ Points_final: 27580, 30 variables
 variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
 Points: 23365 entries , 30 variables (NO NAs)
-variables: match_id, date, season, conference, home_team, visiting_team, set_number, rally_ud, cu_serving, cu_score_pre, opp_score_pre, d_pre, cu_score_end, opp_score_end, cu_score_diff_end, cu_point_won, deciding_set, rally_importance, close_score, rally_in_match, rall_prop_in_match, run_length, prev_win, final_home_set_score, final_away_set_score, won_set, touches_in_rally, timeout_after_point, substitution_after_point, won_match_rally
 
 *Different Dataset Uses*
 Use the clean (no NAs) dataset (points) for model fitting, validation, and markov property testing (assumptions).
 Use the full dataset (points_final) for descriptive summaries, exploratory visuals, and robustness checks.
 
 ##Exploratory Analysis 
+matches: 169, seasons: 7, total_rallies: 27580, unique_sets: 628	
+
 General Stats:
 CU points wins ~50.36% of all points, regardless of serving.
 CU served ~50.19% of the rallies, roughly an equal distribution.
-
 Side-out success ~ 58.35%
 CU wins ~ 58.35% of points when receiving the serve(side-out success).
-
 CU wins ~42.04% of points when serving.
 CU wins ~58.75% of points when receiving the serve.
+
+#Basic Models 
+Logistic regression: glm(formula = y ~ d_pre + I(d_pre^2) + cu_serv, family = binomial(), data = pbp2)
+
+Box–Tidwell Test-This test checks whether the logit of the outcome is linear in the continuous predictors
+
+GAM model:Family: binomial Link function: logit  Formula:y ~ s(d_pre) + cu_serv
 
 
 ##Markov Chain Modeling 

@@ -14,11 +14,6 @@ knitr::opts_chunk$set(out.width = "60%",fig.align='center')
 1. Ethan + Sydney's data cleaning and transformation combined here.
 ## Load Libraries 
 ```{r}
-# install.packages("here")   # only once allows us to all call from same space 
-# install.packages("ResourceSelection")
-# install.packages("randtests")
-```
-```{r}
 library(tidyverse)
 library(knitr)
 library(tinytex) 
@@ -32,7 +27,6 @@ library(randtests)
 library(purrr)
 library(stringr)
 library(mgcv)      # for GAM
-#library(glmmTMB)   # for mixed-effects logistic regression
 ```
 
 ## Load Datasets
@@ -442,18 +436,6 @@ coef(m_point)
 #forms transition kernel of the markov chain 
 ```
 
-##OTHER LOGSTIC MODEL w/ addition of m_point2
-```{r,FALSE}
-m_point2 <- glm(
-  y ~ 
-    d_pre + I(d_pre^2) +
-    run_length+ cu_serv,
-  data = pbp2,
-  family = binomial()
-)
-summary(m_point2)
-#plot(m_point2)
-```
 
 ```{r}
 #Probability function for Model Predictions 
@@ -1282,29 +1264,6 @@ EPV
 ```
 EPV ≥ 10 → model is likely stable
 
-
-
-```{r}
-#Model specification / goodness-of-fit
-# Likelihood ratio test vs null model
-null_model <- glm(y ~ 1, data = pbp2, family = binomial()) 
-anova(null_model, m_point2, test = "Chisq") 
-
-# AIC / BIC for model comparison
-AIC(m_point2) 
-BIC(m_point2)
-```
-Goodness of fit NOT GOOD.
-
-```{r}
-# Cook's distance
-cooks_d <- cooks.distance(m_point2)
-summary(cooks_d)
-# Threshold often 4 / n
-influential <- which(cooks_d > 4 / nrow(pbp2))
-length(influential)  # number of influential points
-```
-LOTS OF INFLUENTIAL POINTS==NOTED
 
 ```{r}
 #model fit aswell 
