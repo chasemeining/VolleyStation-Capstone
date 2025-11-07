@@ -1070,6 +1070,112 @@ dplyr::glimpse(state_df_GAM)
 
 #440
 
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr); library(tidyr); library(ggplot2)
+  library(mgcv); library(pROC); library(readr); library(tibble)
+})
+
+df <- readr::read_csv("points_final.csv", show_col_types = FALSE)
+
+gam_df <- df %>%
+  transmute(
+    match_id,
+    set_number,
+    y = as.integer(cu_point_won),
+    d_pre,
+    cu_serv = as.integer(cu_serving)
+  ) %>% drop_na()
+
+m_gam <- mgcv::gam(y ~ s(d_pre) + cu_serv, data = gam_df, family = binomial())
+print(summary(m_gam))
+
+# 5-fold CV by match
+set.seed(42)
+ids <- unique(gam_df$match_id)
+folds <- split(ids, cut(seq_along(ids), 5, labels = FALSE))
+res <- lapply(1:5, function(k){
+  tr <- gam_df %>% filter(!match_id %in% folds[[k]])
+  te <- gam_df %>% filter( match_id %in% folds[[k]])
+  m  <- mgcv::gam(y ~ s(d_pre) + cu_serv, data = tr, family = binomial())
+  p  <- predict(m, newdata = te, type = "response")
+  eps <- 1e-9
+  data.frame(
+    fold=k,
+    auc = as.numeric(pROC::auc(te$y, p)),
+    logloss = -mean(te$y*log(p+eps) + (1-te$y)*log(1-p+eps)),
+    brier = mean((p-te$y)^2)
+  )
+})
+cv_tbl <- dplyr::bind_rows(res)
+print(cv_tbl)
+print(colMeans(cv_tbl[,c("auc","logloss","brier")]))
+```
+
+```{r}
+p_hat <- function(d, s) as.numeric(predict(m_gam, data.frame(d_pre=d, cu_serv=as.integer(s)), type="response"))
+TARGET <- 25; MAX <- 50
+V <- array(0, dim=c(MAX+1, MAX+1, 2))
+is_term <- function(cu,op) (cu>=TARGET || op>=TARGET) && abs(cu-op)>=2
+for(cu in 0:MAX) for(op in 0:MAX) if(is_term(cu,op)){ val <- as.integer(cu>op); V[cu+1,op+1,] <- val }
+
+value_step <- function(V){
+  Vn <- V
+  for(cu in 0:MAX) for(op in 0:MAX) for(s in 0:1){
+    if(is_term(cu,op)) next
+    p <- p_hat(cu-op, s)
+    win  <- V[min(cu+1,MAX)+1, op+1, 2]   # CU serves after win
+    lose <- V[cu+1, min(op+1,MAX)+1, 1]   # Opp serves after loss
+    Vn[cu+1,op+1,s+1] <- p*win + (1-p)*lose
+  }
+  Vn
+}
+for(it in 1:300){
+  Vn <- value_step(V)
+  if(max(abs(Vn - V)) < 1e-10) { V <- Vn; break }
+  V <- Vn
+}
+v_state <- function(cu,op,s) V[cu+1,op+1,s+1]
+
+print(v_state(0,0,1))
+print(v_state(24,23,1))
+print(v_state(23,24,0))
+```
+
+```{r}
+p_hat_rally <- predict(m_gam, newdata = gam_df, type = "response")
+cuts <- cut(p_hat_rally, breaks = quantile(p_hat_rally, probs = seq(0,1,0.1)),
+            include.lowest = TRUE, labels = FALSE)
+calib <- gam_df %>%
+  mutate(bin = cuts, phat = p_hat_rally) %>%
+  group_by(bin) %>%
+  summarise(phat = mean(phat), ybar = mean(y), n = dplyr::n(), .groups="drop")
+
+readr::write_csv(cv_tbl, "cv_gam_rally_metrics.csv")
+readr::write_csv(calib, "calibration_rally_deciles.csv")
+
+ggplot(calib, aes(phat, ybar, size=n)) +
+  geom_point(alpha=.85) +
+  geom_abline(slope=1, intercept=0, linetype=2) +
+  labs(x="Predicted rally-win prob", y="Observed rally-win rate",
+       title="Rally-level calibration (GAM)") +
+  theme_minimal()
+ggsave("calibration_rally_deciles.png", width=6.5, height=4.5, dpi=300)
+
+# Key states table
+key_states <- tibble::tribble(
+  ~state, ~cu, ~opp, ~srv,
+  "Start (0-0, CU serve)", 0L, 0L, 1L,
+  "Start (0-0, OPP serve)",0L, 0L, 0L,
+  "24-23, CU serve",       24L,23L, 1L,
+  "24-23, OPP serve",      24L,23L, 0L,
+  "23-24, CU serve",       23L,24L, 1L,
+  "23-24, OPP serve",      23L,24L, 0L
+) |> dplyr::mutate(prob = purrr::pmap_dbl(list(cu,opp,srv), ~ v_state(..1,..2,..3)))
+readr::write_csv(key_states, "key_states_markov_from_GAM.csv")
+print(key_states)
+```
+
 
 
 
