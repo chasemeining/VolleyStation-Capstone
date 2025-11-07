@@ -5,6 +5,7 @@ date: "2025-10-17"
 ---
 
 *REMINDER*
+
 Research Questions 
 ~Are there high-leverage scores?
 ~Are there ways of grouping scores together into discrete categories by their win probabilities?
@@ -88,30 +89,9 @@ More Markov.....
 
 
 
-
-
 ##Model Building Ideas to add to Logstic Regression
--Include more predictors
--Use more flexible models
+
 ~Quadratic term (poly(d_pre,2)), natural splines, GAMs
--Incorporate rally-level momentum
-~Could include previous point winner streak or CU run length to model momentum effects.
--Account for random effects
-~Could include match-level random effect:
--Predict probabilities beyond the observed range
-~Could extend to full range of score differentials to cover blowouts or rare cases.
--interaction terms
-- team-specific random slopes
--Bayesian hierarchical logistic regression for full posterior probabilities.
-
-
-## Clustering 
-Clustering models could further refine the Markov approach by capturing differences across matches or non-randomness beyond score/serve effects.
-
--Collect win probabilities across all score states
--Define distance metric
--Apply clustering method: use SALSO or k-means/hierarchical clustering to group score states into categories, can tune number of clusters with silhouette score or stability checks
--Interpret clusters: map clustered states back onto volleyball scoreboards to highlight “high-leverage” regions 
 
 
 ##Assumptions Met
@@ -134,26 +114,7 @@ Assumptions
 
 
 ##Model Validation (training/testing)
--Split into train/test by match to check predictive accuracy.
--Could calculate ROC, AUC, Brier score to see if model predicts rally outcomes well.
-- reliability plots; check that WP rises after CU-won rallies and falls after losses.
--brier score, AUC, log loss, confusion matrix : caliberation (reliabilty)
--Hosmer-Lemeshow test using the package resourcesselection 
--Cross-validation that respects matches (group CV), Don’t randomly split rallies — use grouped CV by match_id (leave-one-match-out or grouped k-fold).If LOMO is slow, use group k-fold (e.g., 5 folds grouped by match) 
--Compare observed vs predicted transition counts (Markov goodness-of-fit)
--Markov-level validation: simulate matches and compare distributions (most important Markov-specific check)
-
-
-##final output plots, graphics 
--Win probability heatmaps: create score heatmaps for non-deciding and deciding sets.Show probability gradients across scores.
--Cluster visualizations: assign colors to each cluster and overlay on the heatmap + highlight regions where single points cause big win probability swings.
--Comparative analysis: distribution of cluster categories between deciding vs. non-deciding sets. Identify which scores consistently emerge as “high leverage.”
-
-##Reporting & Interpretation
--Summarize key findings
--Practical implications
--Limitations
-
+-
 
 
 NOTES
