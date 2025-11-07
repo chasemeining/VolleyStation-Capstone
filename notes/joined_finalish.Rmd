@@ -1470,6 +1470,7 @@ sim_results <- replicate(10000, simulate_set(V))
 
 mean(sim_results)  # compare to average predicted start-of-set CU win probability
 ```
+
 ```{r}
 #new dataframe with only simulated probabilities and key info
 points_sim <- points_final %>%
@@ -1502,3 +1503,5 @@ predicted_win_rate <- mean(sim_results)
 cat("Observed CU win rate:", observed_win_rate, "\n")
 cat("Simulated CU win rate:", predicted_win_rate, "\n")
 ```
+
+
