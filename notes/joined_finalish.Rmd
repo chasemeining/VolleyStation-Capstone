@@ -1183,6 +1183,7 @@ m_deciding <- glm(y ~ d_pre + I(d_pre^2) + cu_serv,
 m_nondeciding <- glm(y ~ d_pre + I(d_pre^2) + cu_serv,
                      data = pbp2, family = binomial(), subset = !deciding_set)
 
+
 broom::tidy(m_deciding)
 broom::tidy(m_nondeciding)
 ```

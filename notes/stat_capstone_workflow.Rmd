@@ -1479,6 +1479,7 @@ ggplot(points_balanced, aes(x = cu_score_end, fill = deciding_set)) +
   theme_minimal(base_size = 14)
 ```
 
+
 Now using modeling and our data with logistic regression.
 ```{r}
 #might change 

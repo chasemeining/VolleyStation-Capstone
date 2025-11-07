@@ -5,6 +5,7 @@ date: "2025-10-17"
 ---
 
 *REMINDER*
+
 Research Questions 
 ~Are there high-leverage scores?
 ~Are there ways of grouping scores together into discrete categories by their win probabilities?
