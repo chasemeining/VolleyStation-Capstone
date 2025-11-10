@@ -253,7 +253,7 @@ points <- points_final %>%
 
 ```{r}
 #export to github
-readr::write_csv(points_final, "points_final.csv")
+#readr::write_csv(points_final, "points_final.csv")
 #readr::write_csv(points_final, "points.csv")
 ```
 
@@ -429,6 +429,17 @@ coef(m_point)
 #forms transition kernel of the markov chain 
 ```
 
+```{r}
+#distribution 
+ggplot(pbp2, aes(x = d_pre)) +
+  geom_histogram(bins = 30, fill = "#440154FF", color = "white") +
+  labs(
+    title = "Distribution of Pre-Rally Score Differential",
+    x = "Score Differential (CU - Opponent)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
 
 #Logstic Regression Dignostic Testing 
 A. Logistic Regression (Rally-Level Markov Model) Diagnostics
@@ -923,7 +934,7 @@ knitr::kable(key_states1, digits = 4, align = c("l","r","r","c","r"))
 key_states1
 
 table_md1 <- kable(key_states1, format = "markdown")
-writeLines(table_md1, "key_states_from_GAM_table.md")
+#writeLines(table_md1, "key_states_from_GAM_table.md")
 ```
 
 ```{r}
@@ -946,7 +957,7 @@ knitr::kable(deuce_grid1, digits = 4)
 deuce_grid1
 
 table_md1 <- kable(deuce_grid1, format = "markdown")
-writeLines(table_md1, "deuce_grid_from_GAM_table.md")
+#writeLines(table_md1, "deuce_grid_from_GAM_table.md")
 ```
 
 ```{r}
@@ -1035,7 +1046,7 @@ ggplot(band, aes(x = opp, y = cu)) +
   geom_contour(aes(z = prob), breaks = seq(0.5, 0.9, by = 0.05),
                color = "white", linewidth = 0.35) +
   facet_wrap(~ cu_serve) +
-  scale_fill_viridis_c(name = "CU set Win\nProbability", limits = c(0,1)) +
+  scale_fill_viridis_c(name = "CU Set Win\nProbability", limits = c(0,1)) +
   coord_equal() +
   labs(x = "Opponent Points", y = "CU Points",
        title = "Deuce Band (22–30): Set Win Probability by Serving Team") +
@@ -1433,10 +1444,11 @@ Dark/low values = rallies with minimal impact on the eventual set win.
 ```{r}
 ggplot(points2, aes(x = cu_score_end, y = opp_score_end, fill = leverage)) +
   geom_tile() +
-  scale_fill_viridis_c(option = "plasma") +
-  labs(title = "Rally Leverage: Change in CU Set Win Probability per Rally",
-       x = "Opponent Score", y = "CU Score", fill = "Δ Win Probability") +
+  scale_fill_viridis_c() +
+  labs(title = "Change in CU Set Win Probability",
+       x = "Opponent Score", y = "CU Score", fill = "Change In Win Probability") +
   coord_equal()
+#rally leverage 
 ```
 
 #Q2: Are there ways of grouping scores together into discrete categories by their win probabilities?
@@ -1456,8 +1468,9 @@ grid30_GAM %>%
   ggplot(aes(x = opp, y = cu, fill = win_group)) +
   geom_tile() +
   #facet_wrap(~ cu_serve, labeller = labeller(cu_serve = c("0" = "Opponent Serve", "1" = "CU Serve"))) +
+  #scale_fill_viridis_c()+  WANT COLORS FROM THIS PALLETE FOR GRAPHIC FIX FOR ME 
   scale_fill_manual(
-    values = c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"),
+    values = c("#440154FF", "steelblue", "lightgreen", "yellow"),
     name = "CU Win Probability"
   ) +
   labs(
@@ -1472,40 +1485,13 @@ grid30_GAM %>%
     plot.subtitle = element_text(color = "gray30")
   )
 ```
+
+
 
 Description:
 This heatmap visualizes the CU women’s volleyball team’s probability of winning a set based on the current score.
 Each tile represents a possible score state (CU score, Opponent score), colored by the estimated win probability group: Low (0–25%), Medium (25–50%), High (50–75%), and Very High (75–100%).
 The clear diagonal pattern shows how CU’s chances increase as their score surpasses the opponent’s, with noticeably higher probabilities when CU is serving at key score margins.
-
-```{r}
-grid30_GAM %>%
-  filter(!is.na(prob)) %>%
-  mutate(
-    prob_group = ntile(prob, 4),  # splits into 4 equal-frequency groups
-    win_group = factor(prob_group, labels = c("Lowest", "Low-Medium", "High-Medium", "Highest"))
-  ) %>%
-  ggplot(aes(x = opp, y = cu, fill = win_group)) +
-  geom_tile() +
-  #facet_wrap(~ cu_serve, labeller = labeller(cu_serve = c("0" = "Opponent Serve", "1" = "CU Serve"))) +
-  scale_fill_manual(
-    values = c("#F8766D", "#7CAE00", "#00BFC4", "#C77CFF"),
-    name = "CU Win Probability"
-  ) +
-  labs(
-    title = "CU Set Win Probability by Score State",
-    subtitle = "Heatmap of Win Likelihoods Grouped Into Four Probability Tiers",
-    x = "Opponent Score",
-    y = "CU Score"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    plot.subtitle = element_text(color = "gray30")
-  )
-```
-
-Quantile-based grouping: split the probabilities based on their distribution in the data. This ensures roughly equal numbers of tiles in each group.
 
 ```{r}
 #ADDS the discrete grouping to the dataset
