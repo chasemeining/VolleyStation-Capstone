@@ -37,10 +37,7 @@ CU wins ~58.75% of points when receiving the serve.
 #Basic Models 
 Logistic regression: glm(formula = y ~ d_pre + I(d_pre^2) + cu_serv, family = binomial(), data = pbp2)
 
-Box–Tidwell Test-This test checks whether the logit of the outcome is linear in the continuous predictors
-
 GAM model:Family: binomial Link function: logit  Formula:y ~ s(d_pre) + cu_serv
-
 
 ##Markov Chain Modeling 
 1.  **Define the state space.**\
@@ -78,22 +75,6 @@ More Markov.....
 -transition prob -> absorbing prob -> validation checks
 
 
-
-
-
-
-
-
-
-
-
-
-
-##Model Building Ideas to add to Logstic Regression
-
-~Quadratic term (poly(d_pre,2)), natural splines, GAMs
-
-
 ##Assumptions Met
 Assumptions 
 
@@ -109,12 +90,6 @@ Assumptions
 
 -(Model calibration: Brier / calibration plot / H-L test)- These support assumptions about model correctness and fit.
 
-
-
-
-
-##Model Validation (training/testing)
--
 
 
 NOTES
