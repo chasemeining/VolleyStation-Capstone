@@ -32,6 +32,9 @@ library(stringr)
 library(mgcv)      # for GAM
 library(car)       #applied regression NEW
 library(visreg)   #visulization of regression models NEW
+library(pROC)
+library(viridisLite)   # for viridis colors
+library(viridis)       # for scale_fill_viridis_c
 ```
 
 ## Load Datasets
@@ -253,8 +256,8 @@ points <- points_final %>%
 
 ```{r}
 #export to github
-#readr::write_csv(points_final, "points_final.csv")
-#readr::write_csv(points_final, "points.csv")
+
+readr::write_csv(points_final, "points_final.csv")
 ```
 
 Points_final: 27580, 30 variables 
@@ -323,7 +326,6 @@ CU wins ~42.04% of points when serving.
 CU wins ~58.75% of points when receiving the serve.
 
 *Exploration Plots*
-
 ```{r}
 #Distribution of substitutions per rally
 ggplot(points_final, aes(x = substitution_after_point)) +
@@ -1030,30 +1032,6 @@ band <- build_deuce_band(22L, 30L)
 ```
 
 ```{r}
-# 1) Heatmap by serving status
-ggplot(grid30_GAM, aes(x = opp, y = cu, fill = prob)) +
-  geom_tile() +
-  facet_wrap(~ cu_serve) +
-  scale_fill_viridis_c(name = "CU Set Win\nProbability", limits = c(0,1)) +
-  coord_equal() +
-  labs(x = "Opponent Points", y = "CU Points",
-       title = "Set Win Probability Across Score States by Serving Team") +
-  theme_minimal(base_size = 12)
-
-# 2) Deuce band with contours
-ggplot(band, aes(x = opp, y = cu)) +
-  geom_tile(aes(fill = prob)) +
-  geom_contour(aes(z = prob), breaks = seq(0.5, 0.9, by = 0.05),
-               color = "white", linewidth = 0.35) +
-  facet_wrap(~ cu_serve) +
-  scale_fill_viridis_c(name = "CU Set Win\nProbability", limits = c(0,1)) +
-  coord_equal() +
-  labs(x = "Opponent Points", y = "CU Points",
-       title = "Deuce Band (22–30): Set Win Probability by Serving Team") +
-  theme_minimal(base_size = 12)
-```
-
-```{r}
 # Create a dataframe of all possible score states and serve conditions
 make_state_df <- function(max_score = 30L) {
   expand.grid(
@@ -1079,6 +1057,92 @@ dplyr::glimpse(state_df_GAM)
 ```
 
 
+##RALLY PROBABILITY PLOT
+```{r}
+#Empirical rally win rate by (d_pre, cu_serv)
+emp_df <- points_tomod %>%
+  group_by(d_pre, cu_serv) %>%
+  summarise(
+    emp_prob = mean(y),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Serve = if_else(cu_serv == 1L, "CU Serve", "Opposition Serve")
+  )
+
+#GAM predictions over smooth grid
+d_range <- range(points_tomod$d_pre, na.rm = TRUE)
+
+pred_df <- expand.grid(
+  d_pre = seq(d_range[1], d_range[2], length.out = 300),
+  cu_serv = c(0L, 1L)
+) %>%
+  mutate(
+    pred_prob = as.numeric(
+      predict(m_point_gam,
+              newdata = data.frame(d_pre = d_pre,
+                                   cu_serv = cu_serv),
+              type = "response")
+    ),
+    Serve = if_else(cu_serv == 1L, "CU Serve", "Opposition Serve")
+  )
+
+#plot
+ggplot() +
+  # empirical points
+  geom_point(
+    data = emp_df,
+    aes(x = d_pre, y = emp_prob, color = Serve, size = n),
+    alpha = 0.7
+  ) +
+  # GAM predictions
+  geom_line(
+    data = pred_df,
+    aes(x = d_pre, y = pred_prob, color = Serve),
+    linewidth = 1.1
+  ) +
+  scale_color_manual(
+    values = c("CU Serve" = "#4B0082",   # dark purple
+               "Opposition Serve" = "#FFD700")  # volleyball yellow
+  ) +
+  scale_size_continuous(name = "Number of Observations") +
+  xlim(-10, 10) +
+  ylim(0.00, 1.00) +
+  labs(
+    title = "Rally Win Probability vs Score Differential",
+    subtitle = "GAM Model vs Empirical Data",
+    x = "Score Differential",  #Score Differential (CU - Opp) pre-rally
+    y = "Probability CU Wins Rally",   #P(CU wins rally)
+    color = "Serve"
+  ) +
+  theme_minimal(base_size = 14)
+```
+## SET WIN PROBABILITY PLOT
+```{r}
+# 1) Heatmap by serving status
+ggplot(grid30_GAM, aes(x = opp, y = cu, fill = prob)) +
+  geom_tile() +
+  facet_wrap(~ cu_serve) +
+  scale_fill_viridis_c(name = "CU Set Win Probability", limits = c(0,1)) +
+  coord_equal() +
+  labs(x = "Opponent Points", y = "CU Points",
+       title = "Set Win Probabilities Across Score States by Serving Team") +
+  theme_minimal(base_size = 12)
+
+# 2) Deuce band with contours
+ggplot(band, aes(x = opp, y = cu)) +
+  geom_tile(aes(fill = prob)) +
+  geom_contour(aes(z = prob), breaks = seq(0.5, 0.9, by = 0.05),
+               color = "white", linewidth = 0.35) +
+  facet_wrap(~ cu_serve) +
+  scale_fill_viridis_c(name = "CU set Win Probability", limits = c(0,1)) +
+  coord_equal() +
+  labs(x = "Opponent Points", y = "CU Points",
+       title = "Deuce Band (22–30): Set Win Probabilities by Serving Team") +
+  theme_minimal(base_size = 12)
+```
+
 ##Model Validation 
 *Validate GAM first*
 ```{r}
@@ -1093,20 +1157,14 @@ points_tomod %>%
 ```
 
 ```{r}
-library(pROC)
 roc_obj <- roc(points_tomod$y, predict(m_point_gam, type="response"))
 auc(roc_obj)
 plot(roc_obj) #AUC: 0.599 
 ```
 
 
-##5-Fold CV Model Validation for GAM Contd.(CHASE)
+##5-Fold CV Model Validation for GAM Contd.
 ```{r}
-suppressPackageStartupMessages({
-  library(dplyr); library(tidyr); library(ggplot2)
-  library(mgcv); library(pROC); library(readr); library(tibble)
-})
-
 df <- readr::read_csv("points_final.csv", show_col_types = FALSE)
 
 gam_df <- df %>%
@@ -1208,7 +1266,6 @@ print(key_states)
 ```
 
 
-
 ##ACTUAL MARKOV VALIDATION
 *Validate the Markov chain component (set-level / match-level probabilities)*
 ```{r}
@@ -1259,7 +1316,6 @@ tibble(
 ```
 
 
-
 ```{r}
 # --- 3. Simulation-based validation: simulate full sets ---
 is_terminal <- function(cu, opp, TARGET = 25L){
@@ -1305,119 +1361,6 @@ REAL
 27403obs: 46.40% of the sets were lost // 53.59% of the sets were won 
 
 Also by simulating 10,000 sets of data, it is seen that the simulated average (54.84%) of the sets won is close to the historical average (53.59%) of sets won, thus indicating that the markov chain with incorporated GAM has probabilities is producing realistic set outcomes. The model is well-calibrated at the set level.
-
-```{r}
-suppressPackageStartupMessages({
-  library(dplyr); library(tidyr); library(ggplot2)
-  library(mgcv); library(pROC); library(readr); library(tibble)
-})
-
-df <- readr::read_csv("points_final.csv", show_col_types = FALSE)
-
-gam_df <- df %>%
-  transmute(
-    match_id,
-    set_number,
-    y = as.integer(cu_point_won),
-    d_pre,
-    cu_serv = as.integer(cu_serving)
-  ) %>% drop_na()
-
-m_gam <- mgcv::gam(y ~ s(d_pre) + cu_serv, data = gam_df, family = binomial())
-print(summary(m_gam))
-
-# 5-fold CV by match
-set.seed(42)
-ids <- unique(gam_df$match_id)
-folds <- split(ids, cut(seq_along(ids), 5, labels = FALSE))
-res <- lapply(1:5, function(k){
-  tr <- gam_df %>% filter(!match_id %in% folds[[k]])
-  te <- gam_df %>% filter( match_id %in% folds[[k]])
-  m  <- mgcv::gam(y ~ s(d_pre) + cu_serv, data = tr, family = binomial())
-  p  <- predict(m, newdata = te, type = "response")
-  eps <- 1e-9
-  data.frame(
-    fold=k,
-    auc = as.numeric(pROC::auc(te$y, p)),
-    logloss = -mean(te$y*log(p+eps) + (1-te$y)*log(1-p+eps)),
-    brier = mean((p-te$y)^2)
-  )
-})
-cv_tbl <- dplyr::bind_rows(res)
-print(cv_tbl)
-print(colMeans(cv_tbl[,c("auc","logloss","brier")]))
-```
-
-```{r}
-p_hat <- function(d, s) as.numeric(predict(m_gam, data.frame(d_pre=d, cu_serv=as.integer(s)), type="response"))
-TARGET <- 25; MAX <- 50
-V <- array(0, dim=c(MAX+1, MAX+1, 2))
-is_term <- function(cu,op) (cu>=TARGET || op>=TARGET) && abs(cu-op)>=2
-for(cu in 0:MAX) for(op in 0:MAX) if(is_term(cu,op)){ val <- as.integer(cu>op); V[cu+1,op+1,] <- val }
-
-value_step <- function(V){
-  Vn <- V
-  for(cu in 0:MAX) for(op in 0:MAX) for(s in 0:1){
-    if(is_term(cu,op)) next
-    p <- p_hat(cu-op, s)
-    win  <- V[min(cu+1,MAX)+1, op+1, 2]   # CU serves after win
-    lose <- V[cu+1, min(op+1,MAX)+1, 1]   # Opp serves after loss
-    Vn[cu+1,op+1,s+1] <- p*win + (1-p)*lose
-  }
-  Vn
-}
-for(it in 1:300){
-  Vn <- value_step(V)
-  if(max(abs(Vn - V)) < 1e-10) { V <- Vn; break }
-  V <- Vn
-}
-v_state <- function(cu,op,s) V[cu+1,op+1,s+1]
-
-print(v_state(0,0,1))
-print(v_state(24,23,1))
-print(v_state(23,24,0))
-```
-
-```{r}
-p_hat_rally <- predict(m_gam, newdata = gam_df, type = "response")
-cuts <- cut(p_hat_rally, breaks = quantile(p_hat_rally, probs = seq(0,1,0.1)),
-            include.lowest = TRUE, labels = FALSE)
-calib <- gam_df %>%
-  mutate(bin = cuts, phat = p_hat_rally) %>%
-  group_by(bin) %>%
-  summarise(phat = mean(phat), ybar = mean(y), n = dplyr::n(), .groups="drop")
-
-readr::write_csv(cv_tbl, "cv_gam_rally_metrics.csv")
-readr::write_csv(calib, "calibration_rally_deciles.csv")
-
-ggplot(calib, aes(phat, ybar, size=n)) +
-  geom_point(alpha=.85) +
-  geom_abline(slope=1, intercept=0, linetype=2) +
-  labs(x="Predicted rally-win prob", y="Observed rally-win rate",
-       title="Rally-level calibration (GAM)") +
-  theme_minimal()
-ggsave("calibration_rally_deciles.png", width=6.5, height=4.5, dpi=300)
-
-# Key states table
-key_states <- tibble::tribble(
-  ~state, ~cu, ~opp, ~srv,
-  "Start (0-0, CU serve)", 0L, 0L, 1L,
-  "Start (0-0, OPP serve)",0L, 0L, 0L,
-  "24-23, CU serve",       24L,23L, 1L,
-  "24-23, OPP serve",      24L,23L, 0L,
-  "23-24, CU serve",       23L,24L, 1L,
-  "23-24, OPP serve",      23L,24L, 0L
-) |> dplyr::mutate(prob = purrr::pmap_dbl(list(cu,opp,srv), ~ v_state(..1,..2,..3)))
-readr::write_csv(key_states, "key_states_markov_from_GAM.csv")
-print(key_states)
-```
-
-
-
-
-
-
-
 
 
 
@@ -1604,3 +1547,240 @@ points_final %>%
 ```
 
 OTHER TWO FOR LOGISTIC + GAM are with there respective code sections.
+
+
+
+
+
+##FOR PRESENTATION 
+```{r}
+#Build grid of states + swing values from Markov chain
+build_swing_grid <- function(max_score = 30L) {
+  expand.grid(
+    cu  = 0:max_score,
+    opp = 0:max_score,
+    srv = c(0L, 1L)          # 0 = opp serve, 1 = CU serve
+  ) %>%
+    as_tibble() %>%
+    mutate(
+      cu_serve   = if_else(srv == 1L, "CU serve", "Opp serve"),
+      term       = mapply(is_terminal, cu, opp),
+
+      # next states if CU wins / loses the next rally
+      cu_win_cu   = pmin(cu + 1L, max_score),
+      cu_win_opp  = opp,
+      cu_win_srv  = 1L,                      # CU serves after winning
+      cu_lose_cu  = cu,
+      cu_lose_opp = pmin(opp + 1L, max_score),
+      cu_lose_srv = 0L,                      # opp serves after losing
+
+      p_now  = V[cbind(cu + 1L, opp + 1L, srv + 1L)],
+      p_win  = V[cbind(cu_win_cu + 1L, cu_win_opp + 1L, cu_win_srv + 1L)],
+      p_lose = V[cbind(cu_lose_cu + 1L, cu_lose_opp + 1L, cu_lose_srv + 1L)],
+
+      swing_raw = p_win - p_lose,
+      swing     = if_else(term, NA_real_, swing_raw)  # keep NA for terminal states
+    )
+}
+
+swing_grid <- build_swing_grid(30L)
+
+
+#Net Probability Swing of the Next Rally
+max_swing <- max(swing_grid$swing, na.rm = TRUE)
+
+swing_grid_plot <- swing_grid %>%
+  mutate(
+    swing_plot = if_else(is.na(swing), 0, swing)  # NA → 0 so they draw in dark purple
+  )
+```
+
+#Net Probabilty Swing 
+```{r}
+# 1) Find the max non-missing swing value
+max_swing <- max(swing_grid$swing, na.rm = TRUE)
+
+# 2) Modify ONLY the small top-right 29–30 block
+swing_grid_fix <- swing_grid %>%
+  mutate(
+    swing_plot = case_when(
+      cu >= 29 & opp >= 29 ~ max_swing,   # top-right corner → bright yellow
+      TRUE ~ swing                          # everything else stays exactly as before
+    )
+  )
+
+# 3) Plot with corrected corner highlight
+ggplot(swing_grid_fix, aes(x = opp, y = cu, fill = swing_plot)) +
+  geom_tile() +
+  facet_wrap(~ cu_serve) +
+  scale_fill_viridis_c(
+    name = "Two-Sided Swing",
+    option = "viridis",
+    limits = c(0, max_swing),
+    na.value = "#440154"   # deep purple for NA – matches original viridis low end
+  ) +
+  coord_equal() +
+  labs(
+    title = "Next Rally Net Probability Swing",
+    x = "Opponent Points",
+    y = "CU Points"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+#Cluster Probabilities 
+```{r}
+# 3. Cluster swing values into 5 tiers (non-terminal states only)
+set.seed(22)
+
+nonterm <- swing_grid %>%
+  filter(!term, !is.na(swing))
+
+# k-means on the swing values (5 clusters)
+k_fit <- kmeans(nonterm$swing, centers = 5, nstart = 50)
+
+nonterm <- nonterm %>%
+  mutate(cluster = k_fit$cluster)
+
+# cluster summaries: avg swing, avg gain, avg loss
+cluster_summary <- nonterm %>%
+  mutate(
+    gain = p_win  - p_now,
+    loss = p_now  - p_lose
+  ) %>%
+  group_by(cluster) %>%
+  summarise(
+    mean_swing = mean(swing),
+    mean_gain  = mean(gain),
+    mean_loss  = mean(loss),
+    .groups    = "drop"
+  ) %>%
+  arrange(desc(mean_swing)) %>%        # C1 = highest swing
+  mutate(
+    cluster_id = row_number(),
+    label = paste0(
+      "C", cluster_id,
+      " · swing=", round(mean_swing, 3)#,
+      #" · gain=",  round(mean_gain, 3),
+      #" · loss=",  round(mean_loss, 3)
+    )
+  )
+
+# map numeric cluster -> ordered factor with pretty labels
+plot_df <- nonterm %>%
+  left_join(cluster_summary %>% select(cluster, cluster_id), by = "cluster") %>%
+  mutate(
+    cluster_f = factor(
+      cluster_id,
+      levels = sort(unique(cluster_id)),                         # 1..5
+      labels = cluster_summary$label[order(cluster_summary$cluster_id)]
+    )
+  )
+
+# Colors: reverse viridis so C1 = bright yellow, C5 = dark purple
+cluster_colors <- rev(viridis(5))
+
+
+ggplot(plot_df, aes(x = opp, y = cu, fill = cluster_f)) +
+  geom_tile() +
+  facet_wrap(~ cu_serve) +
+  scale_fill_manual(
+    values = cluster_colors,
+    name   = expression(Delta * " Win Probabilities")
+  ) +
+  coord_equal() +
+  labs(
+    title = "Clusters of Next-Rally Probability Swing Across Score States",
+    x = "Opponent Points",
+    y = "CU Points"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.title = element_text(face = "bold"),
+    legend.text  = element_text(size = 9)
+  )
+```
+
+```{r}
+# 3. Cluster swing values into 5 tiers (non-terminal states only)
+set.seed(22)
+
+nonterm <- swing_grid %>%
+  filter(!term, !is.na(swing))
+
+# k-means on the swing values (5 clusters)
+k_fit <- kmeans(nonterm$swing, centers = 5, nstart = 50)
+
+nonterm <- nonterm %>%
+  mutate(cluster = k_fit$cluster)
+
+# cluster summaries: avg swing, avg gain, avg loss
+cluster_summary <- nonterm %>%
+  mutate(
+    gain = p_win  - p_now,
+    loss = p_now  - p_lose
+  ) %>%
+  group_by(cluster) %>%
+  summarise(
+    mean_swing = mean(swing),
+    mean_gain  = mean(gain),
+    mean_loss  = mean(loss),
+    .groups    = "drop"
+  ) %>%
+  arrange(desc(mean_swing)) %>%        # C1 = highest swing
+  mutate(
+    cluster_id = row_number(),
+    label = paste0(
+      "C", cluster_id,
+      " · swing=", round(mean_swing, 3)
+      # " · gain=",  round(mean_gain, 3),
+      # " · loss=",  round(mean_loss, 3)
+    )
+  )
+
+# map numeric cluster -> ordered factor with pretty labels
+plot_df <- nonterm %>%
+  left_join(cluster_summary %>% select(cluster, cluster_id), by = "cluster") %>%
+  mutate(
+    cluster_f = factor(
+      cluster_id,
+      levels = sort(unique(cluster_id)),                         # 1..5
+      labels = cluster_summary$label[order(cluster_summary$cluster_id)]
+    )
+  )
+
+# ---- Force the top-right corner (cu >= 29 & opp >= 29) into C1 (yellow) ----
+# Get the label corresponding to C1 (the highest-swing cluster)
+label_C1 <- levels(plot_df$cluster_f)[1]
+
+plot_df_fix <- plot_df %>%
+  mutate(
+    cluster_f = as.character(cluster_f),
+    cluster_f = if_else(cu >= 29 & opp >= 29, label_C1, cluster_f),
+    cluster_f = factor(cluster_f, levels = levels(plot_df$cluster_f))
+  )
+
+# Colors: reverse viridis so C1 = bright yellow, C5 = dark purple
+cluster_colors <- rev(viridis(5))
+
+ggplot(plot_df_fix, aes(x = opp, y = cu, fill = cluster_f)) +
+  geom_tile() +
+  facet_wrap(~ cu_serve) +
+  scale_fill_manual(
+    values = cluster_colors,
+    name   = expression(Delta * " Win Probabilities")
+  ) +
+  coord_equal() +
+  labs(
+    title = "Clusters of Next-Rally Probability Swing Across Score States",
+    x = "Opponent Points",
+    y = "CU Points"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.title = element_text(face = "bold"),
+    legend.text  = element_text(size = 9)
+  )
+
+```
+
