@@ -1641,7 +1641,6 @@ ggplot(swing_grid_fix, aes(x = opp, y = cu, fill = swing_plot)) +
   theme_minimal(base_size = 14)
 ```
 
-
 #Cluster Probabilities 
 ```{r}
 # 3. Cluster swing values into 5 tiers (non-terminal states only)
